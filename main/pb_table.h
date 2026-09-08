@@ -12,7 +12,7 @@
 #define PB_STATUS_H 26          // 顶部状态栏高度(分数/球数/倍率)
 
 #define PB_SEG_MAX 40
-#define PB_CIRCLE_MAX 8         // 3 个 pop bumper + 中场/弹弓顶小立柱
+#define PB_CIRCLE_MAX 8         // 3 个 pop bumper + 4 个小立柱(kick==0)
 
 // 线段的玩法类别(决定颜色与计分)。
 typedef enum {
@@ -44,32 +44,46 @@ typedef struct {
 #define PB_LANE_COUNT 3
 #define PB_BALL_R 4.0f
 
-// 中央虫洞(黑洞):球滚进洞心被捕获,得分后从随机车道口弹出。
-// 位置在两挡板之间的球路必经点:徽章圆盘底缘 y=230,黑洞顶缘 233 不压徽章;
-// 距两侧弹弓面/挡板抬起端都留有安全间距。台面美术的工具链也从这里读坐标
-// (tools/gen_assets.py),改这里即可全同步。
+// ---- 洞系(原版 kickout,规格 §2.4) ----
+// 黑洞 a_kout3:原版画在两挡板之间的落球口(规格 §1 分区 J),只有没接住的球才
+// 进得去。之前放在 (107,248) —— 弹弓之间、挡板上方 32px 的必经落球线上,几乎每
+// 颗下落的球都被吞回顶部,球数长期不推进("无限球"的根因)。
 #define PB_HOLE_X 107.0f
-#define PB_HOLE_Y 248.0f
-#define PB_HOLE_R 7.0f      // 捕获半径(洞口视觉半径 ~13)
+#define PB_HOLE_Y 300.0f
+#define PB_HOLE_R 8.0f      // 捕获半径(洞视觉半径 ~13,画在落球口暗区里)
 
-// 左上虫洞入口:外墙与左上轨道导轨之间的窄通道尽头(对标原版左上 sink),
-// 与中央黑洞构成双洞循环。通道净宽 ~16px,球(r4)可通过。
-#define PB_HOLE2_X 21.0f
-#define PB_HOLE2_Y 68.0f
-#define PB_HOLE2_R 5.0f     // 捕获半径(通道窄,洞视觉半径 ~6)
+// 引力井 a_kout1:左上窄通道尽头的踢出洞。通道净宽 ~16px,球(r4)可通过。
+#define PB_WELL_X 21.0f
+#define PB_WELL_Y 68.0f
+#define PB_WELL_R 5.0f      // 捕获半径(通道窄,洞视觉半径 ~6)
 
-// 右上 hyperspace kick-out 洞:发球道内墙与右上导轨之间的窄区,
-// 连续命中递进大奖(对标原版 hyperspace)。
+// hyperspace 踢出洞 a_kout2:发球道内墙与右上导轨之间的窄区。
 #define PB_HS_X 196.0f
 #define PB_HS_Y 68.0f
 #define PB_HS_R 5.0f
 
-// 燃料灯环:绕徽章外弧 5 盏(角度 150/120/90/60/30 度,半径 45),
-// pb_art.py 的灯座与渲染层的亮灯都从这组常量计算坐标,两边角度表必须一致。
-#define PB_FUEL_CX 107.0f
-#define PB_FUEL_CY 190.0f
-#define PB_FUEL_R  45.0f
-#define PB_FUEL_COUNT 5
+// ---- 灯组与信息带(台面坐标,美术与渲染层共用同一组常量) ----
+// outer_circle 军衔进度环:绕徽章外弧 5 盏(角度 150/120/90/60/30)。
+// 徽章圆心 = 环心,所以 pb_art.py 的徽章从这里取 cy。
+#define PB_RING_CX 107.0f
+#define PB_RING_CY 194.0f
+#define PB_RING_R  45.0f
+#define PB_RING_COUNT 5
+
+// bmpr_inc_lights bumper 升级灯组:三盏,排在中央 bumper 裙下方的空档里。
+#define PB_UPG_CX 107.0f
+#define PB_UPG_CY 111.0f
+#define PB_UPG_DX 12.0f
+#define PB_UPG_COUNT 3
+
+// info_text_box 信息带:徽章上方那条唯一的横向空档。提示文字只允许出现在这里,
+// 不再居中叠在徽章弧字/行星上(规格 §3 文本框 + "UI 互不遮挡"要求)。
+// 上下边界与 bumper 裙边(123.5)、进度环顶灯座(145.6)各留 ≥1.5px,
+// 这组关系由 tests/test_pb_physics.c 的 [spec layout] 用例钉死。
+#define PB_INFO_X0 46.0f
+#define PB_INFO_Y0 125.0f
+#define PB_INFO_X1 160.0f
+#define PB_INFO_Y1 144.0f
 
 // 找第 i 个掉落目标 / 弹弓对应的线段索引(台面固定布局,顺序即语义)。
 int pb_table_target_seg(const pb_table *t, int i);

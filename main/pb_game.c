@@ -1,6 +1,10 @@
 // main/pb_game.c —— 游戏状态机实现。
 // 步进约定:pb_game_step 只在 LVGL 任务(lv_timer)里跑,渲染同任务直接读状态;
 // 按键回调(其他任务)只通过 pb_game_key 入队,无锁竞争。
+//
+// 每条规则的注释都指向 docs/space-cadet-spec.md 的条目号(§x.y),分值取自
+// SpaceCadetPinball-web/SpaceCadetPinball/control.cpp 的原版数组。规格之外
+// 的行为(丢球保险、卡死救球)在 §6 移植偏差表里逐条登记。
 #include "pb_game.h"
 
 #include <math.h>
@@ -9,35 +13,47 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-#define NVS_NS   "pinball"
-#define NVS_KEY  "hs"
+#define NVS_NS     "pinball"
+#define NVS_KEY_HS "hs"       // 旧版单值最高分,只读迁移用
+#define NVS_KEY_TBL "hst"     // 5 槽榜单 blob(§5.1/§5.5)
 
-// ---- 计分表(对标原版量级) ----
-#define SCORE_BUMP   500        // x 连击档位 1..4 → 500/1000/1500/2000(原版递进)
-#define SCORE_SLING  500
-#define SCORE_TARGET 1500
-#define SCORE_BANK   50000
-#define SCORE_LANE   2000
-#define SCORE_MULT   2500
-#define SCORE_HOLE   2500      // x 虫洞连击 1..3 → 2500/5000/7500(原版 sink 表)
-#define SCORE_RANK   10000     // x 新军衔(满环晋升奖)
-#define SCORE_FUELMAX 25000     // 封顶军衔后满环奖
+// ---- 分值表(§2) ----
+#define SCORE_REBO      500u      // §2.1 rebo3/4 回弹器(本台面的小立柱)
+#define SCORE_LANE      2000u     // §2.2 roll1/2/3 再入车道
+#define SCORE_TGT       500u      // §2.3 target7/8/9 单个
+#define SCORE_TGT_BANK  1500u     // §2.3 三个全倒
+#define SCORE_HOLE      20000u    // §2.4 a_kout3 黑洞 control_kickout_score2[0]
+#define SCORE_WELL      50000u    // §2.4 a_kout1 引力井 control_kickout_score3[0]
+#define PB_SCORE_MAX    99999999u // 记分板 8 位宽;原版是 1e9 进位(§4.6)
 
-// hyperspace 递进表(原版 kickout_score1 的五级取四档)
-static const uint32_t HS_SCORES[4] = { 10000, 20000, 50000, 150000 };
-// 军衔缩写(面板宽 42px,全名放不下)
-static const char *const RANK_NAMES[5] = { "CDT", "ENS", "LT", "CPT", "ADM" };
+// §2.1 control_bump_scores1[BmpIndex]
+static const uint32_t BUMP_SCORES[PB_BUMP_TIER_MAX + 1] = { 500, 1000, 1500, 2000 };
+// §2.4 control_kickout_score1 的 0/2/3/4 档(第 1 档是 Special,§6 不移植)
+static const uint32_t HS_TIERS[PB_HS_TIERS] = { 10000, 20000, 50000, 150000 };
+// §4.2 score_multipliers[]
+static const uint32_t MULT_VALUES[PB_MULT_COUNT] = { 1, 2, 3, 5, 10 };
+// §3 RankRcArray[9] 的缩写版(RANK 面板净宽 38px)
+static const char *const RANK_NAMES[PB_RANK_MAX] = {
+    "CDT", "ENS", "LT", "CPT", "LCDR", "CDR", "CMOD", "ADM", "FADM"
+};
 
-const char *pb_rank_name(uint8_t rank) {
-    if (rank < 1 || rank > 5) rank = 1;
-    return RANK_NAMES[rank - 1];
+// 三个 kickout 洞的踢出后冷却。原版读自 .dat 的 TimerTime1(未随源码发布),
+// 属可调手感参数,登记在规格 §6 移植偏差表。
+#define HOLE_COOLDOWN_S 6.0f
+#define WELL_COOLDOWN_S 8.0f
+#define HS_COOLDOWN_S   3.0f
+
+uint32_t pb_mult_value(uint8_t idx) {
+    return (idx < PB_MULT_COUNT) ? MULT_VALUES[idx] : MULT_VALUES[PB_MULT_COUNT - 1];
 }
 
-// 伪随机(虫洞弹出车道用,确定性即可)。
-static uint32_t rnd32(void) {
-    static uint32_t s = 0x9e3779b9u;
-    s = s * 1664525u + 1013904223u;
-    return s >> 8;
+uint32_t pb_bump_score(uint8_t tier) {
+    return (tier <= PB_BUMP_TIER_MAX) ? BUMP_SCORES[tier] : BUMP_SCORES[PB_BUMP_TIER_MAX];
+}
+
+const char *pb_rank_name(uint8_t rank) {
+    if (rank < 1 || rank > PB_RANK_MAX) rank = 1;
+    return RANK_NAMES[rank - 1];
 }
 
 static void show_msg(pb_game *g, const char *txt, float dur) {
@@ -47,13 +63,13 @@ static void show_msg(pb_game *g, const char *txt, float dur) {
 
 // 返回实际得分(含倍率),命中点飘字直接显示这个值。
 static uint32_t add_score(pb_game *g, uint32_t base) {
-    uint32_t v = base * g->mult;
+    uint32_t v = base * pb_mult_value(g->mult_idx);
     g->score += v;
-    if (g->score > 9999999u) g->score = 9999999u;
+    if (g->score > PB_SCORE_MAX) g->score = PB_SCORE_MAX;
     return v;
 }
 
-// 在命中点登记一条得分飘字(无空闲槽则丢弃最不重要的:直接不显)。
+// 在命中点登记一条得分飘字(无空闲槽则丢弃)。
 static void popup(pb_game *g, uint32_t v, float x, float y) {
     for (int i = 0; i < PB_POPUPS; i++) {
         pb_popup *p = &g->popups[i];
@@ -67,24 +83,74 @@ static void popup(pb_game *g, uint32_t v, float x, float y) {
     }
 }
 
-// 点亮一盏燃料灯;满环晋升军衔(对标原版 fuel bargraph → rank 晋升)。
-static void add_fuel(pb_game *g) {
-    if (g->fuel_lit < PB_FUEL_COUNT) g->fuel_lit++;
-    if (g->fuel_lit < PB_FUEL_COUNT) return;
-    g->fuel_lit = 0;
-    char buf[20];
-    if (g->rank < 5) {
-        g->rank++;
-        uint32_t got = add_score(g, SCORE_RANK * g->rank);
-        popup(g, got, PB_FUEL_CX, PB_FUEL_CY - 40.0f);
-        snprintf(buf, sizeof(buf), "PROMOTION! %s", pb_rank_name(g->rank));
-    } else {
-        uint32_t got = add_score(g, SCORE_FUELMAX);
-        popup(g, got, PB_FUEL_CX, PB_FUEL_CY - 40.0f);
-        snprintf(buf, sizeof(buf), "FUEL BONUS");
+// ---- 榜单(§5) ----
+
+// §5.5 Verification:原版是 Σ(名字字符) + Σ(分数);本固件无名字输入(§6 OUT),
+// 校验和退化为 Σ分数 + 固定盐值,仍能挡住半写/篡改。
+typedef struct {
+    int32_t score[PB_HS_SLOTS];
+    uint32_t verify;
+} hs_blob_t;
+
+static uint32_t hs_checksum(const hs_blob_t *b) {
+    uint32_t sum = 0x5ca1ab1eu;
+    for (int i = 0; i < PB_HS_SLOTS; i++) sum += (uint32_t)b->score[i];
+    return sum;
+}
+
+static void hs_sync_top(pb_game *g) {
+    g->high_score = (g->hs[0] > 0) ? (uint32_t)g->hs[0] : 0u;
+}
+
+static void hs_clear(pb_game *g) {
+    for (int i = 0; i < PB_HS_SLOTS; i++) g->hs[i] = PB_HS_EMPTY;   // §5.2 哨兵
+    g->hs_new = -1;
+    hs_sync_top(g);
+}
+
+// §5.3 入榜判定 + §5.4 插入下移。返回是否入榜。
+static bool hs_submit(pb_game *g, uint32_t score) {
+    g->hs_new = -1;
+    if (score == 0) return false;                    // §5.3 score<=0 不入榜
+    for (int i = 0; i < PB_HS_SLOTS; i++) {
+        if (g->hs[i] >= (int32_t)score) continue;    // 找第一个更小的槽
+        for (int k = PB_HS_SLOTS - 1; k > i; k--) g->hs[k] = g->hs[k - 1];
+        g->hs[i] = (int32_t)score;
+        g->hs_new = (int8_t)i;
+        break;
     }
-    show_msg(g, buf, 2.0f);
-    pb_audio_play(PB_SND_BONUS);
+    hs_sync_top(g);
+    return g->hs_new >= 0;
+}
+
+void pb_game_nvs_load(pb_game *g) {
+    hs_clear(g);
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
+
+    hs_blob_t b;
+    size_t sz = sizeof(b);
+    esp_err_t er = nvs_get_blob(h, NVS_KEY_TBL, &b, &sz);
+    if (er == ESP_OK && sz == sizeof(b) && b.verify == hs_checksum(&b)) {
+        memcpy(g->hs, b.score, sizeof(b.score));     // 正常读回
+    } else if (er == ESP_ERR_NVS_NOT_FOUND) {
+        uint32_t legacy = 0;                         // 旧版单值 → 榜首
+        if (nvs_get_u32(h, NVS_KEY_HS, &legacy) == ESP_OK && legacy > 0)
+            g->hs[0] = (int32_t)legacy;
+    }                                                // 其余 = 校验不过,整表清零(§5.5)
+    hs_sync_top(g);
+    nvs_close(h);
+}
+
+void pb_game_nvs_save(pb_game *g) {
+    hs_blob_t b;
+    memcpy(b.score, g->hs, sizeof(b.score));
+    b.verify = hs_checksum(&b);
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_blob(h, NVS_KEY_TBL, &b, sizeof(b));
+    nvs_commit(h);
+    nvs_close(h);
 }
 
 // ---- 输入事件队列 ----
@@ -118,7 +184,8 @@ static void reset_playfield(pb_game *g) {
         int s = pb_table_target_seg(&g->table, i);
         if (s >= 0) g->table.segs[s].solid = true;
     }
-    g->mult = 1;
+    g->mult_idx = 0;            // §4.2 倍率索引从 x1 起
+    g->bump_prog = 0;           // §3 bmpr_inc_lights 清空
     g->target_reset = 0;
 }
 
@@ -137,20 +204,22 @@ static void new_game(pb_game *g) {
     g->ball_num = 1;
     g->ball_save = 0;
     g->ball_save_used = false;
-    g->bump_combo = 0;
     g->new_high = false;
+    g->hs_new = -1;
+    g->bump_tier = 0;           // §2.1 攻击档位随新局重置
+    g->hs_lights = 0;           // §2.4 hyperspace 档位随新局重置
+    g->ring_lit = 0;            // §3 outer_circle
+    g->rank = 1;                // §3 起始军衔 = Cadet(见 §6 移植偏差)
     g->hole_timer = 0;
     g->hole_cooldown = 0;
     g->flash_hole = 0;
-    g->stuck_time = 0;
-    g->lost_time = 0;
-    g->wh_chain = 0;
-    g->hs_chain = 0;
-    g->bump_hits = 0;
-    g->side_timer = 0;
-    g->side_cooldown = 0;
+    g->well_timer = 0;
+    g->well_cooldown = 0;
     g->hs_timer = 0;
     g->hs_cooldown = 0;
+    g->flash_upg = 0;
+    g->stuck_time = 0;
+    g->lost_time = 0;
     for (int i = 0; i < PB_POPUPS; i++) g->popups[i].t = 0;
     reset_playfield(g);
     spawn_ball_in_lane(g);
@@ -164,91 +233,90 @@ void pb_game_init(pb_game *g) {
     pb_table_init(&g->table);
     g->state = PB_STATE_TITLE;
     g->state_timer = 0;
-    g->mult = 1;
-    g->rank = 1;                    // 军衔/燃料跨局保留在内存,冷启动回新兵
-}
-
-void pb_game_nvs_load(pb_game *g) {
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        uint32_t hs = 0;
-        if (nvs_get_u32(h, NVS_KEY, &hs) == ESP_OK) g->high_score = hs;
-        nvs_close(h);
-    }
-}
-
-void pb_game_nvs_save(pb_game *g) {
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_set_u32(h, NVS_KEY, g->high_score);
-    nvs_commit(h);
-    nvs_close(h);
+    g->rank = 1;
+    hs_clear(g);
 }
 
 // ---- 规则命中处理 ----
 
+// §3 再入车道灯是切换式:由灭变亮那一拍才检查 bumper 升级组是否已满。
 static void on_lane(pb_game *g, int lane) {
-    if (g->lane_lit[lane]) return;
-    g->lane_lit[lane] = true;
-    add_score(g, SCORE_LANE);
+    add_score(g, SCORE_LANE);                       // §2.2 穿越即 2000,与灯态无关
+    g->lane_lit[lane] = !g->lane_lit[lane];
     pb_audio_play(PB_SND_LANE);
-    bool all = true;
-    for (int i = 0; i < PB_LANE_COUNT; i++) all &= g->lane_lit[i];
-    if (all) {
-        for (int i = 0; i < PB_LANE_COUNT; i++) g->lane_lit[i] = false;
-        if (g->mult < PB_MULT_MAX) {
-            g->mult++;
-            char buf[20];
-            snprintf(buf, sizeof(buf), "MULTIPLIER x%d", g->mult);
-            show_msg(g, buf, 2.0f);
-            add_score(g, SCORE_MULT);
-        } else {
-            add_score(g, SCORE_MULT);           // 满倍率时车道照常给分
-        }
+    if (!g->lane_lit[lane] || g->bump_prog < PB_UPG_LAMPS) return;
+
+    g->bump_prog = 0;
+    g->flash_upg = 1.0f;
+    if (g->bump_tier < PB_BUMP_TIER_MAX) {
+        g->bump_tier++;                             // §2.1 BmpIndex+1
+        show_msg(g, "WEAPONS UP", 2.0f);            // RC 5 "Weapons Upgraded" 缩短版
         pb_audio_play(PB_SND_BONUS);
     }
 }
 
+// §3 AddRankProgress:外环满 → 军衔 +1。原版这里**不计分**,本实现照此办理。
+static void add_ring(pb_game *g) {
+    if (g->ring_lit < PB_RING_LAMPS) g->ring_lit++;
+    if (g->ring_lit < PB_RING_LAMPS) return;
+    g->ring_lit = 0;
+    char buf[20];
+    if (g->rank < PB_RANK_MAX) {
+        g->rank++;
+        snprintf(buf, sizeof buf, "PROMOTED %s", pb_rank_name(g->rank));  // RC 83
+    } else {
+        snprintf(buf, sizeof buf, "TOP RANK");
+    }
+    show_msg(g, buf, 2.0f);
+    pb_audio_play(PB_SND_BONUS);
+}
+
+// §2.3 倍率目标组:单个 500;三个全倒 1500 + 倍率升一档(RC 56-59)。
 static void on_target(pb_game *g, int idx) {
     if (g->target_down[idx]) return;
     g->target_down[idx] = true;
     int s = pb_table_target_seg(&g->table, idx);
     if (s >= 0) g->table.segs[s].solid = false;
-    uint32_t got = add_score(g, SCORE_TARGET);
-    popup(g, got, g->table.world.ball.pos.x, g->table.world.ball.pos.y - 10.0f);
+    pb_ball *b = &g->table.world.ball;
+    uint32_t got = add_score(g, SCORE_TGT);
+    popup(g, got, b->pos.x, b->pos.y - 10.0f);
     g->flash_target[idx] = 0.3f;
-    add_fuel(g);                        // 放倒目标点一盏燃料灯
     pb_audio_play(PB_SND_TARGET);
 
     bool all = true;
     for (int i = 0; i < PB_TARGET_COUNT; i++) all &= g->target_down[i];
-    if (all) {
-        uint32_t got = add_score(g, SCORE_BANK);
-        popup(g, got, g->table.world.ball.pos.x, g->table.world.ball.pos.y - 12.0f);
-        show_msg(g, "BONUS 5000", 2.0f);
-        g->target_reset = 1.2f;                 // 稍后整组立起
-        pb_audio_play(PB_SND_BONUS);
-    }
+    if (!all) return;
+
+    got = add_score(g, SCORE_TGT_BANK);
+    popup(g, got, b->pos.x, b->pos.y - 12.0f);
+    if (g->mult_idx < PB_MULT_COUNT - 1) g->mult_idx++;    // §4.2 索引推进
+    char buf[20];
+    snprintf(buf, sizeof buf, "MULT x%lu",
+             (unsigned long)pb_mult_value(g->mult_idx));
+    show_msg(g, buf, 2.0f);
+    add_ring(g);                                          // §3 组完成推进 1 段
+    g->target_reset = 1.2f;                               // 稍后整组立起
+    pb_audio_play(PB_SND_BONUS);
 }
 
+// §4.3 球保存只在发射瞬间武装、每球一次;用掉即熄灯(原版 Message(20))。
 static void on_drain(pb_game *g) {
-    g->table.world.ball.active = false;
-    g->bump_combo = 0;                  // 连击随球结束
-    // 清虫洞残留:hole_timer 挂着会在到期时把下一颗球瞬移到车道口
+    pb_ball *b = &g->table.world.ball;
+    b->active = false;
+    // 清所有过场残留:计时挂着会在到期时把下一颗球瞬移进台面(丢球/无限球根因)
     g->hole_timer = 0;
+    g->well_timer = 0;
+    g->hs_timer = 0;
     g->flash_hole = 0;
     g->lost_time = 0;
-    g->side_timer = 0;
-    g->hs_timer = 0;
-    g->wh_chain = 0;
-    g->hs_chain = 0;
+    g->bump_prog = 0;                             // §3 掉球清空升级灯组
     if (g->ball_save > 0) {
-        g->ball_save = 0;               // 每球只保一次:耗尽,防 8s 窗口内循环重发
+        g->ball_save = 0;
         g->ball_save_used = true;
         spawn_ball_in_lane(g);
         g->state = PB_STATE_LAUNCH;
         g->state_timer = 0;
-        show_msg(g, "BALL SAVED", 2.0f);
+        show_msg(g, "RE-DEPLOY", 2.0f);          // RC 96
         pb_audio_play(PB_SND_BONUS);
         return;
     }
@@ -257,19 +325,36 @@ static void on_drain(pb_game *g) {
     g->state_timer = 0;
 }
 
-// 局末/中途退场时统一结算最高分。之前只有打满 3 球进 OVER 才存,
-// 暂停菜单 EXIT/RESTART 中途退出时分数直接丢弃——这就是"高分不记录"的根因。
+// 局末/中途退场统一结算:入榜 + 快照榜首 + 落盘。
+// 之前只有打满 3 球才存,暂停菜单 EXIT/RESTART 直接丢分——"高分不记录"的根因。
 static void finalize_score(pb_game *g) {
-    if (g->score > g->high_score) {
-        g->high_score = g->score;
-        g->new_high = true;
-        pb_game_nvs_save(g);
-    } else {
-        g->new_high = false;
-    }
+    bool in = hs_submit(g, g->score);
+    g->new_high = in;
+    if (in) pb_game_nvs_save(g);
 }
 
 // ---- 主步进 ----
+
+// 三个 kickout 洞共用"捕获 → 过场 → 向上/向下踢回"的骨架。
+static void kickout_capture(pb_game *g, uint32_t base, const char *label,
+                            float *timer, float *cooldown, float cooldown_s) {
+    pb_ball *b = &g->table.world.ball;
+    float px = b->pos.x, py = b->pos.y;
+    b->active = false;
+    uint32_t got = add_score(g, base);
+    popup(g, got, px, py - 10.0f);
+    show_msg(g, label, 2.0f);
+    *timer = 0.8f;
+    *cooldown = cooldown_s;                     // §2.4 踢出后进入冷却,防立即回吸
+    pb_audio_play(PB_SND_BONUS);
+}
+
+// 黑洞踢回时的左右微偏:每次交替,避免连续落洞的球沿同一条轨迹反复被吸。
+static uint8_t hole_kick_side;
+static float hole_kick_sign(void) {
+    hole_kick_side ^= 1;
+    return hole_kick_side ? 1.0f : -1.0f;
+}
 
 void pb_game_step(pb_game *g, float dt) {
     g->state_timer += dt;
@@ -282,6 +367,11 @@ void pb_game_step(pb_game *g, float dt) {
     for (int i = 0; i < PB_TARGET_COUNT; i++)
         if (g->flash_target[i] > 0) g->flash_target[i] -= dt;
     if (g->flash_sling > 0) g->flash_sling -= dt;
+    if (g->flash_upg > 0) g->flash_upg -= dt;
+    if (g->flash_hole > 0) g->flash_hole -= dt;
+    if (g->hole_cooldown > 0) g->hole_cooldown -= dt;
+    if (g->well_cooldown > 0) g->well_cooldown -= dt;
+    if (g->hs_cooldown > 0) g->hs_cooldown -= dt;
 
     // 目标组整组重置
     if (g->target_reset > 0) {
@@ -311,10 +401,10 @@ void pb_game_step(pb_game *g, float dt) {
         // 暂停菜单:UP/DOWN 移动选项,OK 确认
         if (g->state == PB_STATE_PAUSE) {
             if (ev != PB_EV_PRESS) continue;
-            if (key == PB_KEY_L)     g->pause_sel = (uint8_t)((g->pause_sel + 2) % 3);
+            if (key == PB_KEY_L)      g->pause_sel = (uint8_t)((g->pause_sel + 2) % 3);
             else if (key == PB_KEY_R) g->pause_sel = (uint8_t)((g->pause_sel + 1) % 3);
             else if (key == PB_KEY_OK) {
-                if (g->pause_sel == 0)       g->state = g->paused_prev;   // RESUME
+                if (g->pause_sel == 0)      g->state = g->paused_prev;   // RESUME
                 else if (g->pause_sel == 1) {                            // RESTART
                     finalize_score(g);
                     new_game(g);
@@ -344,7 +434,7 @@ void pb_game_step(pb_game *g, float dt) {
                 float v = 800.0f + 450.0f * g->launch_power;
                 g->table.world.ball.vel.x = 0;
                 g->table.world.ball.vel.y = -v;
-                if (!g->ball_save_used)         // 球保存只在每球首次发射时生效
+                if (!g->ball_save_used)         // §4.3 球保存只在每球首次发射时武装
                     g->ball_save = PB_BALL_SAVE_S;
                 g->state = PB_STATE_PLAY;
                 g->state_timer = 0;
@@ -356,7 +446,12 @@ void pb_game_step(pb_game *g, float dt) {
         if (g->state == PB_STATE_PLAY && key != PB_KEY_OK) {
             pb_flipper_set(&g->table.flippers[key == PB_KEY_L ? 0 : 1],
                            ev == PB_EV_PRESS);
-            if (ev == PB_EV_PRESS) pb_audio_play(PB_SND_FLIP);
+            if (ev == PB_EV_PRESS) {
+                pb_audio_play(PB_SND_FLIP);
+                // §3 挡板挥动推进 bmpr_inc_lights(原版是循环移位,本固件从全灭
+                // 起,故实现为递增,见 §6 移植偏差)
+                if (g->bump_prog < PB_UPG_LAMPS) g->bump_prog++;
+            }
         }
     }
 
@@ -378,7 +473,7 @@ void pb_game_step(pb_game *g, float dt) {
         pb_ball *b = &g->table.world.ball;
         if (b->pos.y > g->table.drain_y) { on_drain(g); break; }
 
-        // 顶部车道 rollover:球横向滚过灯插的 x(原版就是这么触发的)。
+        // 顶部车道 rollover:球横向滚过灯插的 x(§2.2 原版即按穿越判定)。
         // y 容差把判定锁在灯插那一条带上,球在台面下方横穿时不会误触。
         if (fabsf(b->pos.y - g->table.lane_y) < 10.0f) {
             for (int i = 0; i < PB_LANE_COUNT; i++) {
@@ -404,83 +499,51 @@ void pb_game_step(pb_game *g, float dt) {
             }
         }
 
-        // 球落回挡板区 = 虫洞/hyperspace 连击结束(对标原版球归底重置)
-        if (b->active && b->pos.y > 265.0f) {
-            g->wh_chain = 0;
-            g->hs_chain = 0;
-        }
-
-        // --- 洞系计时与冷却 ---
-        if (g->flash_hole > 0) g->flash_hole -= dt;
-        if (g->hole_cooldown > 0) g->hole_cooldown -= dt;
-        if (g->side_cooldown > 0) g->side_cooldown -= dt;
-        if (g->hs_cooldown > 0) g->hs_cooldown -= dt;
-
-        // 中央黑洞:球滚进洞心被捕获,连击分后从随机车道口弹出。
+        // 黑洞 a_kout3:两挡板间隙的落球口。§2.4 20000 分 + 向上踢回挡板区,
+        // 冷却期内不再捕获 → 球直接掉进 drain,球数正常推进。
         if (g->hole_cooldown <= 0 && b->active) {
             float hx = b->pos.x - PB_HOLE_X, hy = b->pos.y - PB_HOLE_Y;
             if (hx * hx + hy * hy < PB_HOLE_R * PB_HOLE_R) {
-                float px = b->pos.x, py = b->pos.y;
-                b->active = false;
-                uint32_t got = add_score(g, SCORE_HOLE * (g->wh_chain + 1));
-                popup(g, got, px, py - 10.0f);
-                show_msg(g, "WORMHOLE!", 1.5f);
-                if (g->wh_chain < 2) g->wh_chain++;
                 g->flash_hole = 0.9f;
-                g->hole_timer = 0.9f;
-                pb_audio_play(PB_SND_BONUS);
+                kickout_capture(g, SCORE_HOLE, "BLACK HOLE",
+                                &g->hole_timer, &g->hole_cooldown, HOLE_COOLDOWN_S);
             }
         }
-        // 左上虫洞入口:吞球后从黑洞口喷出(与黑洞构成双洞循环,连击共享)
-        if (g->side_cooldown <= 0 && b->active) {
-            float hx = b->pos.x - PB_HOLE2_X, hy = b->pos.y - PB_HOLE2_Y;
-            if (hx * hx + hy * hy < PB_HOLE2_R * PB_HOLE2_R) {
-                float px = b->pos.x, py = b->pos.y;
-                b->active = false;
-                uint32_t got = add_score(g, SCORE_HOLE * (g->wh_chain + 1));
-                popup(g, got, px, py + 12.0f);
-                show_msg(g, "WORMHOLE!", 1.5f);
-                if (g->wh_chain < 2) g->wh_chain++;
-                g->side_timer = 0.8f;
-                g->side_cooldown = 4.0f;
-                g->hole_cooldown = 2.5f;    // 喷出口(黑洞)防立即回吸
-                pb_audio_play(PB_SND_BONUS);
+        // 引力井 a_kout1:§2.4 50000 分,长冷却,沿通道向下吐回台面。
+        if (g->well_cooldown <= 0 && b->active) {
+            float hx = b->pos.x - PB_WELL_X, hy = b->pos.y - PB_WELL_Y;
+            if (hx * hx + hy * hy < PB_WELL_R * PB_WELL_R) {
+                kickout_capture(g, SCORE_WELL, "GRAVITY WELL",
+                                &g->well_timer, &g->well_cooldown, WELL_COOLDOWN_S);
             }
         }
-        // 右上 hyperspace kick-out:吞球保持后吐回,连击递进(对标原版五级奖)
+        // hyperspace a_kout2:§2.4 按已亮档数取档,第 4 档清环(原版满 4 段清)。
         if (g->hs_cooldown <= 0 && b->active) {
             float hx = b->pos.x - PB_HS_X, hy = b->pos.y - PB_HS_Y;
             if (hx * hx + hy * hy < PB_HS_R * PB_HS_R) {
-                float px = b->pos.x, py = b->pos.y;
-                b->active = false;
-                uint32_t got = add_score(g, HS_SCORES[g->hs_chain]);
-                popup(g, got, px - 4.0f, py + 12.0f);
-                show_msg(g, "HYPERSPACE!", 1.5f);
-                if (g->hs_chain < 3) g->hs_chain++;
-                g->hs_timer = 0.8f;
-                g->hs_cooldown = 3.0f;
-                pb_audio_play(PB_SND_BONUS);
+                kickout_capture(g, HS_TIERS[g->hs_lights], "HYPERSPACE",
+                                &g->hs_timer, &g->hs_cooldown, HS_COOLDOWN_S);
+                g->hs_lights = (uint8_t)((g->hs_lights + 1) % PB_HS_TIERS);
             }
         }
+        // 各洞的踢出动作(位置都在通道/落球口内,不会把球塞进墙里)
         if (g->hole_timer > 0) {
             g->hole_timer -= dt;
             if (g->hole_timer <= 0) {
-                g->hole_lane = (uint8_t)(rnd32() % PB_LANE_COUNT);
-                b->pos.x = g->table.lane_x[g->hole_lane];
-                b->pos.y = 56.0f;
-                b->vel.x = 0;
-                b->vel.y = 60.0f;
+                b->pos.x = PB_HOLE_X;
+                b->pos.y = PB_HOLE_Y - 4.0f;
+                b->vel.x = hole_kick_sign() * 40.0f;
+                b->vel.y = -540.0f;                 // 向上踢回挡板区,避开分隔柱
                 b->active = true;
-                g->hole_cooldown = 4.0f;
             }
         }
-        if (g->side_timer > 0) {
-            g->side_timer -= dt;
-            if (g->side_timer <= 0) {
-                b->pos.x = PB_HOLE_X;
-                b->pos.y = PB_HOLE_Y - 16.0f;
-                b->vel.x = (float)(rnd32() % 120) - 60.0f;
-                b->vel.y = -300.0f;
+        if (g->well_timer > 0) {
+            g->well_timer -= dt;
+            if (g->well_timer <= 0) {
+                b->pos.x = PB_WELL_X - 1.0f;
+                b->pos.y = PB_WELL_Y + 12.0f;
+                b->vel.x = 40.0f;
+                b->vel.y = 260.0f;
                 b->active = true;
             }
         }
@@ -488,15 +551,15 @@ void pb_game_step(pb_game *g, float dt) {
             g->hs_timer -= dt;
             if (g->hs_timer <= 0) {
                 b->pos.x = PB_HS_X;
-                b->pos.y = PB_HS_Y + 10.0f;
+                b->pos.y = PB_HS_Y + 12.0f;
                 b->vel.x = -40.0f;
-                b->vel.y = 200.0f;
+                b->vel.y = 260.0f;
                 b->active = true;
             }
         }
-        // 丢球保险:球不活跃且三个洞过场全空闲(任何漏网路径),2.2s 后按掉球处理,
-        // 杜绝"球消失且球数不变"的假死局面。
-        if (!b->active && g->hole_timer <= 0 && g->side_timer <= 0 && g->hs_timer <= 0) {
+        // 丢球保险(§6 登记的异常恢复,不计分、不改玩法):球不活跃且三个洞过场
+        // 全空闲时 2.2s 后按掉球处理,杜绝"球消失且球数不变"的假死。
+        if (!b->active && g->hole_timer <= 0 && g->well_timer <= 0 && g->hs_timer <= 0) {
             g->lost_time += dt;
             if (g->lost_time > 2.2f) {
                 g->lost_time = 0;
@@ -508,21 +571,20 @@ void pb_game_step(pb_game *g, float dt) {
         }
 
         if (hit.circle >= 0) {
-            if (g->bump_combo < 5) g->bump_combo++;     // 连击:分值随本球内命中数递增
-            int tier = g->bump_combo > 4 ? 4 : g->bump_combo;
-            uint32_t got = add_score(g, SCORE_BUMP * tier);
-            g->flash_circle[hit.circle] = 0.25f;
+            // §2.1 只有 kick>0 的三个是 pop bumper(走档位分);kick==0 的小立柱
+            // 走 §2.1 的 rebo 固定 500。之前全部按 bumper 计分 = 白拿最高 2000。
+            int ci = hit.circle;
+            uint32_t base = (ci < g->table.circle_count && g->table.circles[ci].kick > 0.0f)
+                            ? pb_bump_score(g->bump_tier) : SCORE_REBO;
+            uint32_t got = add_score(g, base);
+            g->flash_circle[ci] = 0.25f;
             popup(g, got, b->pos.x, b->pos.y - 10.0f);
             pb_audio_play(PB_SND_BUMP);
-            if (++g->bump_hits >= 3) {                  // 每 3 次命中点一盏燃料灯
-                g->bump_hits = 0;
-                add_fuel(g);
-            }
         }
         if (hit.seg >= 0) {
             uint8_t kind = g->table.kind[hit.seg];
             if (kind == PB_SEG_SLING) {
-                uint32_t got = add_score(g, SCORE_SLING);
+                uint32_t got = add_score(g, SCORE_REBO);      // §2.1 弹弓 = rebo 500
                 g->flash_sling = 0.25f;
                 popup(g, got, b->pos.x, b->pos.y - 8.0f);
                 pb_audio_play(PB_SND_SLING);
@@ -541,13 +603,13 @@ void pb_game_step(pb_game *g, float dt) {
                 pb_audio_play(PB_SND_OVER);
             } else {
                 g->ball_num++;
-                g->mult = 1;                    // 倍率与车道逐球重置(同原版 bonus)
-                g->ball_save_used = false;      // 新球重新获得一次球保存资格
+                g->mult_idx = 0;                  // §4.2 每球结束倍率归 x1
+                g->ball_save_used = false;        // 新球重新获得一次球保存资格
                 for (int i = 0; i < PB_LANE_COUNT; i++) g->lane_lit[i] = false;
                 spawn_ball_in_lane(g);
                 g->state = PB_STATE_LAUNCH;
                 char buf[16];
-                snprintf(buf, sizeof(buf), "BALL %d", g->ball_num);
+                snprintf(buf, sizeof buf, "BALL %d", g->ball_num);
                 show_msg(g, buf, 1.5f);
             }
             g->state_timer = 0;

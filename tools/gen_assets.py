@@ -322,10 +322,14 @@ def main():
         return float(re.search(r"#define %s\s+([\d.]+)" % name, hsrc).group(1))
 
     g["hole"] = (hconst("PB_HOLE_X"), hconst("PB_HOLE_Y"))
-    g["hole2"] = (hconst("PB_HOLE2_X"), hconst("PB_HOLE2_Y"))
+    g["well"] = (hconst("PB_WELL_X"), hconst("PB_WELL_Y"))
     g["hs_hole"] = (hconst("PB_HS_X"), hconst("PB_HS_Y"))
-    g["fuel"] = (hconst("PB_FUEL_CX"), hconst("PB_FUEL_CY"),
-                 hconst("PB_FUEL_R"), int(hconst("PB_FUEL_COUNT")))
+    g["ring"] = (hconst("PB_RING_CX"), hconst("PB_RING_CY"),
+                 hconst("PB_RING_R"), int(hconst("PB_RING_COUNT")))
+    g["upg"] = (hconst("PB_UPG_CX"), hconst("PB_UPG_CY"),
+                hconst("PB_UPG_DX"), int(hconst("PB_UPG_COUNT")))
+    g["info"] = (hconst("PB_INFO_X0"), hconst("PB_INFO_Y0"),
+                 hconst("PB_INFO_X1"), hconst("PB_INFO_Y1"))
     print("解析几何: %d 线段, %d bumper, %d 挡板, %d 车道"
           % (len(g["segs"]), len(g["circles"]), len(g["flippers"]), len(g["lanes"])))
 

@@ -400,10 +400,15 @@ def _plastic_panel(pt, x0, y0, x1, y1, label, sub=None):
 
 
 def paint_decor(g, bed):
-    """台面装饰:中央徽章(行星+火箭)、两侧塑料面板、招牌、菱形灯插。"""
+    """台面装饰:中央徽章(行星+火箭)、两侧塑料面板、招牌。
+
+    这里不再画任何"灯插":徽章上方的菱形灯插与军衔进度环顶灯、小立柱精灵
+    三重重叠(用户报"文字错乱"的位置),那块空档现在整条让给信息带。
+    """
     pt = Painter(bed)
 
-    cx, cy, r = 107, 190, 37
+    cx, r = 107, 37
+    cy = g["ring"][1]                       # 徽章圆心 = outer_circle 环心
     pt.circle(cx, cy, r + 3.0, fill=(8, 12, 22))
     pt.circle(cx, cy, r + 2.0, fill=COL_RAIL_LO)
     pt.circle(cx, cy, r + 1.0, fill=COL_RAIL_MID)
@@ -452,16 +457,8 @@ def paint_decor(g, bed):
     pt.text_arc(cx, cy + 2, r - 8.5, "SPACE CADET", 218, 322, (198, 226, 255), 0.85)
     pt.text_c(cx, cy + r - 8, "MISSION READY", COL_GOLD, 1.0)
 
-    _plastic_panel(pt, 16, 198, 58, 230, "FUEL", None)      # 百分比由渲染层动态显示
+    _plastic_panel(pt, 16, 198, 58, 230, "ATTACK", None)   # 当前 bumper 档位分值
     _plastic_panel(pt, 156, 198, 198, 230, "RANK", None)    # 军衔由渲染层动态显示
-
-    for dx in (-30, 0, 30):                    # 徽章上方的菱形灯插
-        x, y = cx + dx, 143
-        pt.poly([(x, y - 4.6), (x + 4.6, y), (x, y + 4.6), (x - 4.6, y)], (8, 12, 22))
-        pt.poly([(x, y - 3.3), (x + 3.3, y), (x, y + 3.3), (x - 3.3, y)],
-                mix(COL_LENS_OFF, COL_LENS_ON, 0.32))
-        pt.poly([(x, y - 1.6), (x + 1.6, y - 0.2), (x, y + 1.0), (x - 1.6, y - 0.2)],
-                mix(COL_LENS_ON, (255, 255, 255), 0.45))
 
     pt.rect(62, 57, 152, 68, fill=(10, 16, 28))
     pt.rect(62, 57, 152, 68, outline=COL_RAIL_MID, w=0.8)
@@ -584,10 +581,10 @@ def paint_apron_and_drain(img):
     pt.text_c(176, 293, "OUT", (96, 116, 146), 1.0)
 
 
-def paint_glow_and_vignette(img):
+def paint_glow_and_vignette(g, img):
     glow = Image.new("RGB", (DW, DH), (0, 0, 0))
     gp = Painter(glow)
-    gp.circle(107, 190, 41, fill=(20, 38, 74))
+    gp.circle(107, g["ring"][1], 41, fill=(20, 38, 74))
     gp.rect(62, 57, 152, 68, fill=(18, 32, 58))
     gp.rect(16, 198, 58, 230, fill=(14, 26, 50))
     gp.rect(156, 198, 198, 230, fill=(14, 26, 50))
@@ -639,11 +636,13 @@ def render_background(g):
 
     paint_lane_channel(g, img)
     paint_static_hardware(g, img)
-    paint_black_hole(g, img)
     paint_side_holes(g, img)
-    paint_fuel_lamps(g, img)
+    paint_ring_lamps(g, img)
+    paint_upgrade_lamps(g, img)
     paint_apron_and_drain(img)
-    paint_glow_and_vignette(img)
+    paint_black_hole(g, img)          # 落球口里的黑洞要压在护板之上
+    paint_info_strip(g, img)          # 信息带压在所有塑料件之上(文字底板)
+    paint_glow_and_vignette(g, img)
 
     draw_rail(Painter(img), g["walls"], 4.2)     # 导轨压在最上层
     for s in g["floors"]:
@@ -841,7 +840,7 @@ def draw_sling(pt, a, b, flash):
 
 
 def paint_black_hole(g, img):
-    """中央虫洞:径向渐变深洞 + 光环(坐标与捕获半径见 pb_table.h 的 PB_HOLE_*)。"""
+    """黑洞 a_kout3:画在两挡板之间的落球口里(必须在护板之后,否则被 apron 盖掉)。"""
     pt = Painter(img)
     hx, hy = g["hole"]
     for r, col in ((13.5, (10, 16, 30)), (11.5, (5, 8, 16)), (9.0, (1, 2, 5))):
@@ -852,20 +851,25 @@ def paint_black_hole(g, img):
 
 
 def paint_side_holes(g, img):
-    """左上虫洞入口 + 右上 hyperspace 洞:窄通道里的小尺寸深洞(背景静态部分)。"""
+    """引力井 a_kout1 + hyperspace 洞 a_kout2:窄通道里的小尺寸深洞。
+
+    这两个洞落在台面暗角,不加亮环就看不清"那里有东西"(差距清单 C5)。
+    """
     pt = Painter(img)
-    for key, halo in (("hole2", (70, 120, 200)), ("hs_hole", (200, 150, 70))):
+    for key, halo in (("well", (70, 120, 200)), ("hs_hole", (200, 150, 70))):
         hx, hy = g[key]
+        pt.circle(hx, hy, 8.6, fill=mix((14, 20, 34), halo, 0.10))
+        pt.circle(hx, hy, 8.6, outline=mix(halo, (255, 255, 255), 0.25), w=0.9)
         for r, col in ((6.5, (9, 14, 26)), (5.5, (4, 6, 13)), (4.2, (1, 2, 5))):
             pt.circle(hx, hy, r, fill=col)
         pt.arc(hx - 6.5, hy - 6.5, hx + 6.5, hy + 6.5, 200, 340, halo, 1.1)
 
 
-def paint_fuel_lamps(g, img):
-    """燃料灯座:沿徽章外弧的暗灯(点亮态由渲染层的 LVGL 圆点叠加)。
-    角度表 150/120/90/60/30 必须与 pb_render.c 的 fuel 求值一致。"""
+def paint_ring_lamps(g, img):
+    """outer_circle 灯座:沿徽章外弧的暗灯(点亮态由渲染层的圆点叠加)。
+    角度表 150/120/90/60/30 必须与 pb_render.c 的求值一致。"""
     pt = Painter(img)
-    cx, cy, rad, n = g["fuel"]
+    cx, cy, rad, n = g["ring"]
     for i in range(n):
         a = math.radians(150.0 - 30.0 * i)
         lx = cx + rad * math.cos(a)
@@ -873,6 +877,32 @@ def paint_fuel_lamps(g, img):
         pt.circle(lx, ly, 3.4, fill=(7, 10, 18))
         pt.circle(lx, ly, 2.6, fill=(36, 44, 60))
         pt.circle(lx - 0.7, ly - 0.8, 0.8, fill=(70, 84, 104))
+
+
+def paint_upgrade_lamps(g, img):
+    """bmpr_inc_lights 升级灯座:中央 bumper 裙下方三盏(点亮态由渲染层叠加)。"""
+    pt = Painter(img)
+    cx, cy, dx, n = g["upg"]
+    for i in range(n):
+        lx = cx + (i - (n - 1) / 2.0) * dx
+        pt.ell(lx - 5.4, cy - 4.4, lx + 5.4, cy + 4.4, fill=(6, 10, 18))
+        pt.ell(lx - 4.6, cy - 3.7, lx + 4.6, cy + 3.7, outline=COL_RAIL_MID, w=0.8)
+        pt.ell(lx - 3.9, cy - 3.0, lx + 3.9, cy + 3.0, fill=COL_LENS_OFF)
+
+
+def paint_info_strip(g, img):
+    """info_text_box 信息带:台面唯一的提示文字区,深色凹槽塑料件。
+
+    渲染层的 lbl_msg 以不透明文字落在这条带子里,从此不会再压徽章弧字。
+    """
+    x0, y0, x1, y1 = g["info"]
+    pt = Painter(img)
+    pt.poly([(x0 - 2.2, y0 - 1.6), (x1 - 1.0, y0 - 2.6), (x1 + 2.2, y1 + 1.6),
+             (x0 + 1.0, y1 + 2.6)], (7, 10, 18))
+    pt.rect(x0, y0, x1, y1, fill=(3, 5, 10))
+    pt.rect(x0, y0, x1, y1, outline=(30, 40, 56), w=0.9)
+    pt.line([(x0 + 1, y1 - 0.6), (x1 - 1, y1 - 0.6)], (16, 22, 34), 0.8)
+    pt.rect(x0 + 1.2, y0 + 1.2, x1 - 1.2, y0 + 2.6, fill=(1, 2, 5))
 
 
 def draw_hole_halo(pt, strong):

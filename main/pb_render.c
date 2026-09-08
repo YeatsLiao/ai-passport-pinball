@@ -46,23 +46,25 @@ typedef struct {
     lv_obj_t *lbl_mult;
     lv_obj_t *lbl_msg;
     lv_obj_t *popup_lbl[PB_POPUPS];         // 得分飘字
-    lv_obj_t *overlay;                      // 标题/结算/暂停浮层容器
+    lv_obj_t *overlay;                      // 标题/结算/暂停浮层容器(不遮盖记分板)
     lv_obj_t *info_card;                    // 标题/结算卡片
     lv_obj_t *lbl_ov_title;
-    lv_obj_t *lbl_ov_sub;
+    lv_obj_t *lbl_ov_sub;                   // 5 槽榜单(规格 §5.1)
+    lv_obj_t *lbl_ov_hint;                  // 操作提示行(仅标题页)
     lv_obj_t *lbl_blink;                    // PRESS OK / NEW HIGH SCORE 闪烁行
     lv_obj_t *pause_card;                   // 暂停菜单卡片(金色边框明显区分)
     lv_obj_t *lbl_pause_item[3];
-    lv_obj_t *fuel_lamp[PB_FUEL_COUNT];     // 燃料灯点亮态圆点(叠在背景灯座上)
-    lv_obj_t *lbl_fuel;                     // FUEL 面板百分比
+    lv_obj_t *ring_lamp[PB_RING_COUNT];     // outer_circle 点亮态(军衔进度)
+    lv_obj_t *upg_lamp[PB_UPG_COUNT];       // bmpr_inc_lights 点亮态(bumper 升级)
+    lv_obj_t *lbl_attack;                   // ATTACK 面板:当前 bumper 档位分值
     lv_obj_t *lbl_rank;                     // RANK 面板军衔
-    lv_obj_t *side_glow;                    // 左上洞吞球闪光
+    lv_obj_t *well_glow;                    // 引力井吞球闪光
     lv_obj_t *hs_glow;                      // hyperspace 洞吞球闪光
 
     // 脏值缓存:任何 set_src/set_pos/set_text 都会让 LVGL 标脏重画,
     // 所以只有值真的变了才去碰 LVGL。
     uint32_t last_score;
-    uint8_t  last_ball, last_mult;
+    uint8_t  last_ball, last_mult_idx, last_bump_tier;
     int      last_ball_x, last_ball_y;
     bool     last_ball_active;
     int8_t   last_flip_frame[2];
@@ -76,10 +78,10 @@ typedef struct {
     uint8_t  last_blink;
     uint8_t  last_hole_frame;
     bool     last_pop_on[PB_POPUPS];
-    uint8_t  last_fuel_bits;
+    uint8_t  last_ring_bits, last_ring_lit;
+    uint8_t  last_upg_bits;
     uint8_t  last_rank;
-    uint8_t  last_fuel_lit;
-    bool     last_side_glow, last_hs_glow;
+    bool     last_well_glow, last_hs_glow;
     uint32_t tick;                          // 帧计数:闪烁动画相位
     bool     primed;
 } pb_render_t;
@@ -120,22 +122,37 @@ static lv_obj_t *mk_panel_label(lv_obj_t *parent, int x0, int x1, lv_text_align_
     return l;
 }
 
+// 灯点亮态:小圆点叠在背景烘焙好的灯座上(座子由 pb_art.py 画,坐标同源)。
+static lv_obj_t *mk_lamp(lv_obj_t *parent, int cx, int cy, int d, uint32_t color) {
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, d, d);
+    lv_obj_set_pos(o, cx - d / 2, cy - d / 2);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    return o;
+}
+
 // ---- 构建 ----
 
 static void build_overlay(lv_obj_t *parent) {
+    // 浮层只盖台面,不盖顶部记分板:暂停/结算时当前分数、球数、倍率仍然可见。
+    // 之前整屏半透明层把记分板糊成一片,是"层级不清"的主因(差距清单 C1)。
     R.overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(R.overlay);
-    lv_obj_set_size(R.overlay, PB_SCREEN_W, PB_SCREEN_H);
-    lv_obj_set_pos(R.overlay, 0, 0);
+    lv_obj_set_size(R.overlay, PB_SCREEN_W, PB_SCREEN_H - PB_STATUS_H);
+    lv_obj_set_pos(R.overlay, 0, PB_STATUS_H);
     lv_obj_set_style_bg_color(R.overlay, lv_color_hex(0x04060c), 0);
     lv_obj_set_style_bg_opa(R.overlay, LV_OPA_90, 0);
 
     // 中央不透明卡片:完全压住背后的台面花纹,文字才有对比度。
-    // 高度按"标题 20 号 + 副标题 3 行 14 号 + 闪烁行"预算。
+    // 高度按"标题 20 号 + 提示行 + 5 行榜单 + 闪烁行"逐段预算,互不重叠。
     lv_obj_t *card = lv_obj_create(R.overlay);
     R.info_card = card;
     lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, 216, 148);
+    lv_obj_set_size(card, 216, 180);
     lv_obj_align(card, LV_ALIGN_CENTER, 0, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x0b111e), 0);
@@ -150,22 +167,31 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_set_style_text_color(R.lbl_ov_title, lv_color_hex(C_SCORE), 0);
     lv_obj_set_style_text_font(R.lbl_ov_title, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_align(R.lbl_ov_title, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(R.lbl_ov_title, LV_ALIGN_TOP_MID, 0, 12);
-    
+    lv_obj_align(R.lbl_ov_title, LV_ALIGN_TOP_MID, 0, 6);    // 6..34
+
+    // 副标题行:标题页放操作提示(规格 §4 操作方式),结算页放本局总分。
+    R.lbl_ov_hint = lv_label_create(card);
+    lv_obj_set_width(R.lbl_ov_hint, 200);
+    lv_obj_set_style_text_color(R.lbl_ov_hint, lv_color_hex(0x8a97ab), 0);
+    lv_obj_set_style_text_font(R.lbl_ov_hint, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(R.lbl_ov_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(R.lbl_ov_hint, LV_ALIGN_TOP_MID, 0, 36);    // 36..56
+
+    // 5 槽榜单(规格 §5.1):左对齐成表,数字用 %7ld 右靠齐(等宽数字)。
     R.lbl_ov_sub = lv_label_create(card);
-    lv_obj_set_width(R.lbl_ov_sub, 204);
-    lv_label_set_long_mode(R.lbl_ov_sub, LV_LABEL_LONG_WRAP);
+    lv_obj_set_size(R.lbl_ov_sub, 150, 100);
     lv_obj_set_style_text_color(R.lbl_ov_sub, lv_color_hex(0xdde8f5), 0);
     lv_obj_set_style_text_font(R.lbl_ov_sub, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(R.lbl_ov_sub, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_line_space(R.lbl_ov_sub, 4, 0);
-    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_BOTTOM_MID, 0, -34);
+    lv_obj_set_style_text_align(R.lbl_ov_sub, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_pad_all(R.lbl_ov_sub, 0, 0);
+    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_TOP_MID, 0, 56);     // 56..156
 
     // 底部闪烁行:标题页 PRESS OK / 结算页新纪录提示
     R.lbl_blink = lv_label_create(card);
+    lv_obj_set_width(R.lbl_blink, 200);
     lv_obj_set_style_text_font(R.lbl_blink, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(R.lbl_blink, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(R.lbl_blink, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_align(R.lbl_blink, LV_ALIGN_BOTTOM_MID, 0, -2);   // 158..178
     lv_obj_add_flag(R.lbl_blink, LV_OBJ_FLAG_HIDDEN);
 
     // 暂停菜单卡片:金色边框 + 大字选项,与台面小字/信息卡片明显区分。
@@ -263,19 +289,17 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     R.lbl_ball = mk_panel_label(parent, PANEL_BALL_X0, PANEL_BALL_X1,
                                 LV_TEXT_ALIGN_CENTER, C_TEXT);
 
-    // 台面提示(带半透明底色的胶囊,叠在徽章中心,压得住背景花纹)
+    // 台面提示:只能落在信息带 PB_INFO_* 里(背景已烘焙成深色凹槽)。
+    // 之前居中叠在徽章上,和 "SPACE CADET" 弧字/行星花纹糊成一团(差距清单 C2)。
     R.lbl_msg = lv_label_create(parent);
-    lv_obj_set_width(R.lbl_msg, 150);                       // 限宽换行:长提示不再横穿台面
+    lv_obj_set_size(R.lbl_msg, (int)(PB_INFO_X1 - PB_INFO_X0) - 2,
+                    (int)(PB_INFO_Y1 - PB_INFO_Y0));
+    lv_obj_set_pos(R.lbl_msg, (int)PB_INFO_X0 + 1, (int)PB_INFO_Y0);
     lv_label_set_long_mode(R.lbl_msg, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(R.lbl_msg, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(R.lbl_msg, lv_color_hex(C_MSG), 0);
     lv_obj_set_style_text_font(R.lbl_msg, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_bg_color(R.lbl_msg, lv_color_hex(0x04060c), 0);
-    lv_obj_set_style_bg_opa(R.lbl_msg, LV_OPA_80, 0);
-    lv_obj_set_style_radius(R.lbl_msg, 5, 0);
-    lv_obj_set_style_pad_hor(R.lbl_msg, 6, 0);
-    lv_obj_set_style_pad_ver(R.lbl_msg, 2, 0);
-    lv_obj_align(R.lbl_msg, LV_ALIGN_CENTER, 0, 28);
+    lv_obj_set_style_pad_all(R.lbl_msg, 0, 0);
     lv_label_set_text(R.lbl_msg, "");
     lv_obj_add_flag(R.lbl_msg, LV_OBJ_FLAG_HIDDEN);
 
@@ -288,40 +312,43 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
         R.last_pop_on[i] = false;
     }
 
-    // 燃料灯点亮态:小圆点叠在背景灯座上(角度表与 pb_art.py 一致)
-    for (int i = 0; i < PB_FUEL_COUNT; i++) {
+    // outer_circle 军衔进度环点亮态:5 盏,角度表 150/120/90/60/30 与 pb_art.py
+    // 的 paint_ring_lamps 一致(规格 §3)。
+    for (int i = 0; i < PB_RING_COUNT; i++) {
         float a = (150.0f - 30.0f * i) * 3.14159265f / 180.0f;
-        int lx = (int)(PB_FUEL_CX + PB_FUEL_R * cosf(a));
-        int ly = (int)(PB_FUEL_CY - PB_FUEL_R * sinf(a));
-        lv_obj_t *lamp = lv_obj_create(parent);
-        lv_obj_remove_style_all(lamp);
-        lv_obj_set_size(lamp, 7, 7);
-        lv_obj_set_pos(lamp, lx - 3, ly - 3);
-        lv_obj_set_style_radius(lamp, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(lamp, lv_color_hex(C_SCORE), 0);
-        lv_obj_set_style_bg_opa(lamp, LV_OPA_COVER, 0);
-        lv_obj_add_flag(lamp, LV_OBJ_FLAG_HIDDEN);
-        R.fuel_lamp[i] = lamp;
+        int lx = (int)(PB_RING_CX + PB_RING_R * cosf(a));
+        int ly = (int)(PB_RING_CY - PB_RING_R * sinf(a));
+        R.ring_lamp[i] = mk_lamp(parent, lx, ly, 6, C_SCORE);
     }
 
-    // FUEL/RANK 面板动态文字(背景只画了面板框和标题)
-    R.lbl_fuel = lv_label_create(parent);
-    lv_obj_set_width(R.lbl_fuel, 40);
-    lv_obj_set_style_text_align(R.lbl_fuel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(R.lbl_fuel, lv_color_hex(C_SCORE), 0);
-    lv_obj_set_style_text_font(R.lbl_fuel, &lv_font_montserrat_14, 0);
-    lv_obj_set_pos(R.lbl_fuel, 17, 205);
-    lv_label_set_text(R.lbl_fuel, "0%");
+    // bmpr_inc_lights bumper 升级灯组点亮态:3 盏(规格 §3)。
+    for (int i = 0; i < PB_UPG_COUNT; i++) {
+        int lx = (int)(PB_UPG_CX + (i - (PB_UPG_COUNT - 1) / 2.0f) * PB_UPG_DX);
+        R.upg_lamp[i] = mk_lamp(parent, lx, (int)PB_UPG_CY, 6, C_MSG);
+    }
+
+    // ATTACK/RANK 面板数值:背景招牌在 y 202..210,数值必须落在招牌下方。
+    // 之前 lbl_fuel 放在 y=205 与 "FUEL" 招牌重叠(差距清单 C4)。
+    R.lbl_attack = lv_label_create(parent);
+    lv_obj_set_size(R.lbl_attack, 42, 20);
+    lv_obj_set_style_text_align(R.lbl_attack, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(R.lbl_attack, lv_color_hex(C_SCORE), 0);
+    lv_obj_set_style_text_font(R.lbl_attack, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_pad_all(R.lbl_attack, 0, 0);
+    lv_obj_set_pos(R.lbl_attack, 16, 212);
+    lv_label_set_text_fmt(R.lbl_attack, "%lu",
+                          (unsigned long)pb_bump_score(0));
     R.lbl_rank = lv_label_create(parent);
-    lv_obj_set_width(R.lbl_rank, 40);
+    lv_obj_set_size(R.lbl_rank, 42, 20);
     lv_obj_set_style_text_align(R.lbl_rank, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(R.lbl_rank, lv_color_hex(C_SCORE), 0);
     lv_obj_set_style_text_font(R.lbl_rank, &lv_font_montserrat_14, 0);
-    lv_obj_set_pos(R.lbl_rank, 157, 205);
+    lv_obj_set_style_pad_all(R.lbl_rank, 0, 0);
+    lv_obj_set_pos(R.lbl_rank, 156, 212);
     lv_label_set_text(R.lbl_rank, pb_rank_name(1));
 
-    // 侧洞吞球闪光(蓝=虫洞入口 金=hyperspace)
-    R.side_glow = mk_glow(parent, PB_HOLE2_X, PB_HOLE2_Y, 0x6aa0f0);
+    // 侧洞吞球闪光(蓝=引力井 金=hyperspace)
+    R.well_glow = mk_glow(parent, PB_WELL_X, PB_WELL_Y, 0x6aa0f0);
     R.hs_glow = mk_glow(parent, PB_HS_X, PB_HS_Y, 0xffc860);
 
     build_overlay(parent);
@@ -341,6 +368,23 @@ static int flipper_frame(const pb_flipper *f) {
 
 // 只在变化时写 LVGL:下面 sync 里全部走 "比对缓存 -> 变了才调 setter" 的路子
 
+// 5 槽榜单文本(规格 §5.1/§5.2):空槽显示 -------,本局入榜的那行打 *。
+// 数字用 %7ld 右靠齐(montserrat 数字等宽,能对齐成表)。
+static void fmt_hs_table(pb_game *g, char *buf, size_t n) {
+    size_t off = 0;
+    for (int i = 0; i < PB_HS_SLOTS; i++) {
+        const char *tail = (i + 1 < PB_HS_SLOTS) ? "\n" : "";
+        int w;
+        if (g->hs[i] > 0)
+            w = snprintf(buf + off, n - off, "%d. %7ld%s%s", i + 1, (long)g->hs[i],
+                         g->hs_new == (int8_t)i ? " *" : "", tail);
+        else
+            w = snprintf(buf + off, n - off, "%d. %7s%s", i + 1, "-------", tail);
+        if (w <= 0 || (size_t)w >= n - off) break;
+        off += (size_t)w;
+    }
+}
+
 void pb_render_sync(pb_game *g) {
     const bool force = !R.primed;
     R.tick++;                                   // 闪烁动画相位
@@ -354,9 +398,10 @@ void pb_render_sync(pb_game *g) {
         R.last_ball = g->ball_num;
         lv_label_set_text_fmt(R.lbl_ball, "BALL %d/%d", g->ball_num, PB_BALLS_TOTAL);
     }
-    if (force || g->mult != R.last_mult) {
-        R.last_mult = g->mult;
-        lv_label_set_text_fmt(R.lbl_mult, "x%d", g->mult);
+    if (force || g->mult_idx != R.last_mult_idx) {
+        R.last_mult_idx = g->mult_idx;
+        lv_label_set_text_fmt(R.lbl_mult, "x%lu",
+                              (unsigned long)pb_mult_value(g->mult_idx));
     }
 
     // 球:整数像素坐标变了才移动
@@ -503,21 +548,25 @@ void pb_render_sync(pb_game *g) {
         if (show_info || show_pause) {
             lv_obj_clear_flag(R.overlay, LV_OBJ_FLAG_HIDDEN);
             if (show_info) {
+                char tbl[80];
                 lv_obj_clear_flag(R.info_card, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(R.pause_card, LV_OBJ_FLAG_HIDDEN);
+                fmt_hs_table(g, tbl, sizeof tbl);
+                lv_label_set_text(R.lbl_ov_sub, tbl);
+                lv_obj_clear_flag(R.lbl_ov_hint, LV_OBJ_FLAG_HIDDEN);
                 if (g->state == PB_STATE_TITLE) {
                     lv_label_set_text(R.lbl_ov_title, "SPACE PINBALL");
-                    lv_label_set_text_fmt(R.lbl_ov_sub,
-                        "HIGH %lu\n"
-                        "UP/DOWN: FLIPPER\n"
-                        "HOLD OK: PAUSE",
-                        (unsigned long)g->high_score);
+                    lv_label_set_text(R.lbl_ov_hint, "UP/DOWN:FLIP OK:LAUNCH");
+                    lv_obj_set_style_text_color(R.lbl_ov_hint,
+                                                lv_color_hex(0x8a97ab), 0);
                 } else {
+                    // 总分放在榜单上方的固定行;当前分数/倍率/球数在顶部记分板
+                    // 仍然可见(浮层不再遮盖),所以这里不重复 HIGH 行。
                     lv_label_set_text(R.lbl_ov_title, "GAME OVER");
-                    // PRESS ANY KEY / NEW HIGH 挪到闪烁行,这里只留两行成绩
-                    lv_label_set_text_fmt(R.lbl_ov_sub, "SCORE %lu\nHIGH %lu",
-                                          (unsigned long)g->score,
-                                          (unsigned long)g->high_score);
+                    lv_label_set_text_fmt(R.lbl_ov_hint, "SCORE %lu",
+                                          (unsigned long)g->score);
+                    lv_obj_set_style_text_color(R.lbl_ov_hint,
+                                                lv_color_hex(C_SCORE), 0);
                 }
             } else {
                 // 暂停卡片金色边框 + 大字菜单,和台面/信息卡片一眼区分
@@ -565,34 +614,57 @@ void pb_render_sync(pb_game *g) {
         }
     }
 
-    // 燃料灯 + FUEL/RANK 面板文字
-    uint8_t fuel_bits = 0;
-    for (int i = 0; i < PB_FUEL_COUNT; i++)
-        if (i < g->fuel_lit) fuel_bits |= (uint8_t)(1u << i);
-    if (force || fuel_bits != R.last_fuel_bits) {
-        for (int i = 0; i < PB_FUEL_COUNT; i++) {
-            bool on = (fuel_bits >> i) & 1;
-            bool was = (R.last_fuel_bits >> i) & 1;
+    // 军衔进度环 outer_circle 点亮态(规格 §3)
+    uint8_t ring_bits = 0;
+    for (int i = 0; i < PB_RING_COUNT; i++)
+        if (i < g->ring_lit) ring_bits |= (uint8_t)(1u << i);
+    if (force || ring_bits != R.last_ring_bits) {
+        for (int i = 0; i < PB_RING_COUNT; i++) {
+            bool on = (ring_bits >> i) & 1;
+            bool was = (R.last_ring_bits >> i) & 1;
             if (force || on != was) {
-                if (on) lv_obj_clear_flag(R.fuel_lamp[i], LV_OBJ_FLAG_HIDDEN);
-                else    lv_obj_add_flag(R.fuel_lamp[i], LV_OBJ_FLAG_HIDDEN);
+                if (on) lv_obj_clear_flag(R.ring_lamp[i], LV_OBJ_FLAG_HIDDEN);
+                else    lv_obj_add_flag(R.ring_lamp[i], LV_OBJ_FLAG_HIDDEN);
             }
         }
-        R.last_fuel_bits = fuel_bits;
+        R.last_ring_bits = ring_bits;
     }
-    if (force || g->fuel_lit != R.last_fuel_lit || g->rank != R.last_rank) {
-        R.last_fuel_lit = g->fuel_lit;
+
+    // bmpr_inc_lights 升级灯组(规格 §3):已亮 bump_prog 盏;满组后
+    // flash_upg > 0 期间整组闪几下(原版 Message(7, 5.0) 的 flash 语义)。
+    uint8_t upg_bits = 0;
+    for (int i = 0; i < PB_UPG_COUNT; i++)
+        if (i < g->bump_prog) upg_bits |= (uint8_t)(1u << i);
+    if (g->flash_upg > 0 && ((R.tick / 8) & 1)) upg_bits = 0;
+    if (force || upg_bits != R.last_upg_bits) {
+        for (int i = 0; i < PB_UPG_COUNT; i++) {
+            bool on = (upg_bits >> i) & 1;
+            bool was = (R.last_upg_bits >> i) & 1;
+            if (force || on != was) {
+                if (on) lv_obj_clear_flag(R.upg_lamp[i], LV_OBJ_FLAG_HIDDEN);
+                else    lv_obj_add_flag(R.upg_lamp[i], LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        R.last_upg_bits = upg_bits;
+    }
+
+    // ATTACK 面板 = 当前 bumper 档位实际分值(规格 §2.1),RANK = 9 级缩写(§3)。
+    if (force || g->ring_lit != R.last_ring_lit || g->bump_tier != R.last_bump_tier
+        || g->rank != R.last_rank) {
+        R.last_ring_lit = g->ring_lit;
+        R.last_bump_tier = g->bump_tier;
         R.last_rank = g->rank;
-        lv_label_set_text_fmt(R.lbl_fuel, "%d%%", g->fuel_lit * 20);
+        lv_label_set_text_fmt(R.lbl_attack, "%lu",
+                              (unsigned long)pb_bump_score(g->bump_tier));
         lv_label_set_text(R.lbl_rank, pb_rank_name(g->rank));
     }
 
     // 侧洞吞球闪光
-    bool sg = g->side_timer > 0, hg = g->hs_timer > 0;
-    if (force || sg != R.last_side_glow) {
-        R.last_side_glow = sg;
-        if (sg) lv_obj_clear_flag(R.side_glow, LV_OBJ_FLAG_HIDDEN);
-        else    lv_obj_add_flag(R.side_glow, LV_OBJ_FLAG_HIDDEN);
+    bool wg = g->well_timer > 0, hg = g->hs_timer > 0;
+    if (force || wg != R.last_well_glow) {
+        R.last_well_glow = wg;
+        if (wg) lv_obj_clear_flag(R.well_glow, LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(R.well_glow, LV_OBJ_FLAG_HIDDEN);
     }
     if (force || hg != R.last_hs_glow) {
         R.last_hs_glow = hg;

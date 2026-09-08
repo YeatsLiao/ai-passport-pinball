@@ -59,13 +59,15 @@ static const seg_def_t SEGS[] = {
 #define SEG_DEF_COUNT (sizeof(SEGS) / sizeof(SEGS[0]))
 
 // pop bumper:中间大、两侧小(对标原版 bumpers)。
+// kick>0 的三个是真正的 pop bumper(走 control_bump_scores1 档位分);
+// kick==0 的是回弹立柱,走 rebo 固定 500 分(规格 §2.1)。
+// 中央 (107,150) 那颗立柱已删除:它的裙边/帽精灵与军衔进度环顶灯、信息带三重重叠。
 static const pb_circle CIRCLES[] = {
     { {107,  84}, 15, 0.60f, 180, true },
     { { 70, 110}, 12, 0.60f, 170, true },
     { {144, 110}, 12, 0.60f, 170, true },
     { { 58, 180}, 4.5, 0.65f,   0, true },   // 小立柱:给中场加弹点(无 kick)
     { {156, 180}, 4.5, 0.65f,   0, true },
-    { {107, 150}, 4.5, 0.65f,   0, true },   // 中场立柱:bumper 三角下方的回弹点
     { { 78, 208}, 4.0, 0.65f,   0, true },   // 弹弓顶小柱:进挡板区前多一双向弹
     { {136, 208}, 4.0, 0.65f,   0, true },
 };
