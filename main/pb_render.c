@@ -241,14 +241,19 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     R.lbl_ball = mk_panel_label(parent, PANEL_BALL_X0, PANEL_BALL_X1,
                                 LV_TEXT_ALIGN_CENTER, C_TEXT);
 
-    // 台面提示(叠在中央徽章上,对标原版把任务状态放在台面中心)
+    // 台面提示(带半透明底色的胶囊,叠在徽章中心,压得住背景花纹)
     R.lbl_msg = lv_label_create(parent);
     lv_obj_set_width(R.lbl_msg, 150);                       // 限宽换行:长提示不再横穿台面
     lv_label_set_long_mode(R.lbl_msg, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(R.lbl_msg, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(R.lbl_msg, lv_color_hex(C_MSG), 0);
     lv_obj_set_style_text_font(R.lbl_msg, &lv_font_montserrat_14, 0);
-    lv_obj_align(R.lbl_msg, LV_ALIGN_CENTER, 0, 26);
+    lv_obj_set_style_bg_color(R.lbl_msg, lv_color_hex(0x04060c), 0);
+    lv_obj_set_style_bg_opa(R.lbl_msg, LV_OPA_80, 0);
+    lv_obj_set_style_radius(R.lbl_msg, 5, 0);
+    lv_obj_set_style_pad_hor(R.lbl_msg, 6, 0);
+    lv_obj_set_style_pad_ver(R.lbl_msg, 2, 0);
+    lv_obj_align(R.lbl_msg, LV_ALIGN_CENTER, 0, 28);
     lv_label_set_text(R.lbl_msg, "");
     lv_obj_add_flag(R.lbl_msg, LV_OBJ_FLAG_HIDDEN);
 

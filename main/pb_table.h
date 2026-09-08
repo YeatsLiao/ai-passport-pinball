@@ -45,9 +45,11 @@ typedef struct {
 #define PB_BALL_R 4.0f
 
 // 中央虫洞(黑洞):球滚进洞心被捕获,得分后从随机车道口弹出。
-// 台面美术的工具链也从这里读坐标(tools/gen_assets.py),改这里即可全同步。
+// 位置在两挡板之间的球路必经点:徽章圆盘底缘 y=230,黑洞顶缘 233 不压徽章;
+// 距两侧弹弓面/挡板抬起端都留有安全间距。台面美术的工具链也从这里读坐标
+// (tools/gen_assets.py),改这里即可全同步。
 #define PB_HOLE_X 107.0f
-#define PB_HOLE_Y 190.0f
+#define PB_HOLE_Y 248.0f
 #define PB_HOLE_R 7.0f      // 捕获半径(洞口视觉半径 ~13)
 
 // 找第 i 个掉落目标 / 弹弓对应的线段索引(台面固定布局,顺序即语义)。
