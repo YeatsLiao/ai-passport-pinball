@@ -21,14 +21,75 @@ static void run(pb_world *w, float seconds) {
 
 static pb_table t;
 
+// 圆(含裙边/灯座半径)与矩形是否分离。圆心在矩形内时返回 false。
+static bool circle_outside_rect(float cx, float cy, float r,
+                                float x0, float y0, float x1, float y1) {
+    float dx = fmaxf(x0 - cx, cx - x1);
+    float dy = fmaxf(y0 - cy, cy - y1);
+    return dx * dx + dy * dy > r * r;
+}
+
 static void test_table_sane(void) {
     printf("[table sane]\n");
     pb_table_init(&t);
     CHECK(t.seg_count > 0 && t.seg_count <= PB_SEG_MAX, "seg_count in range");
-    CHECK(t.circle_count == 3, "3 bumpers");
+    // 规格 §2.1:kick>0 的才是 pop bumper(走档位分),kick==0 的是回弹立柱(走 500)。
+    int bumps = 0, posts = 0;
+    for (int i = 0; i < t.circle_count; i++)
+        if (t.circles[i].kick > 0.0f) bumps++; else posts++;
+    CHECK(bumps == 3, "3 pop bumpers");
+    CHECK(posts == 4, "4 rebound posts");
+    CHECK(t.circle_count <= PB_CIRCLE_MAX, "circle_count in range");
     for (int i = 0; i < PB_TARGET_COUNT; i++)
         CHECK(pb_table_target_seg(&t, i) >= 0, "target lookup");
     CHECK(pb_table_sling_seg(&t, 0) >= 0 && pb_table_sling_seg(&t, 1) >= 0, "sling lookup");
+}
+
+// 规格 §1/§2.4 几何不变量 + 硬性要求"UI 各元素互不遮挡"。
+// "黑洞位置不对 → 无限球"和"文字错乱"都回归过不止一次,这里把布局关系钉死。
+static void test_spec_layout(void) {
+    printf("[spec layout]\n");
+    pb_table_init(&t);
+
+    // 黑洞 a_kout3 必须在两挡板尖端之下的落球口里(挡板尖 y≈298,弹弓底 262),
+    // 而不是在弹弓与挡板之间的必经落球线上。
+    CHECK(PB_HOLE_Y > 262.0f && PB_HOLE_Y < PB_SCREEN_H, "black hole in the drain mouth");
+    CHECK(PB_HOLE_X > 100.0f && PB_HOLE_X < 114.0f, "black hole between flipper tips");
+    // 引力井/hyperspace 分居左右窄通道,不与黑洞重合。
+    CHECK(PB_WELL_X < 40.0f && PB_HS_X > 180.0f, "side holes on opposite flanks");
+    CHECK(PB_INFO_Y1 - PB_INFO_Y0 >= 18.0f, "info band fits one 14px line");
+
+    int bad = 0;
+    for (int i = 0; i < t.circle_count; i++) {
+        float r = t.circles[i].r + 1.5f;          // +1.5 = 烘焙裙边外沿
+        bad += !circle_outside_rect(t.circles[i].c.x, t.circles[i].c.y, r,
+                                    PB_INFO_X0, PB_INFO_Y0, PB_INFO_X1, PB_INFO_Y1);
+    }
+    CHECK(bad == 0, "no bumper/post skirt inside the info band");
+
+    bad = 0;
+    for (int i = 0; i < PB_RING_COUNT; i++) {     // 角度表与 pb_art.py 一致
+        float a = (150.0f - 30.0f * i) * 3.14159265f / 180.0f;
+        bad += !circle_outside_rect(PB_RING_CX + PB_RING_R * cosf(a),
+                                    PB_RING_CY - PB_RING_R * sinf(a), 3.4f,
+                                    PB_INFO_X0, PB_INFO_Y0, PB_INFO_X1, PB_INFO_Y1);
+    }
+    CHECK(bad == 0, "ring lamps clear of the info band");
+
+    bad = 0;
+    for (int i = 0; i < PB_UPG_COUNT; i++) {
+        float lx = PB_UPG_CX + (i - (PB_UPG_COUNT - 1) / 2.0f) * PB_UPG_DX;
+        for (int c = 0; c < 3; c++)
+            bad += !circle_outside_rect(t.circles[c].c.x, t.circles[c].c.y,
+                                        t.circles[c].r + 1.5f,
+                                        lx - 5.4f, PB_UPG_CY - 4.4f,
+                                        lx + 5.4f, PB_UPG_CY + 4.4f);
+    }
+    CHECK(bad == 0, "upgrade lamps clear of every bumper skirt");
+
+    // 升级灯组与信息带、信息带与徽章弧(环心 - 环半径 - 灯座)也要分开。
+    CHECK(PB_UPG_CY + 4.4f < PB_INFO_Y0, "upgrade lamps above the info band");
+    CHECK(PB_RING_CY - PB_RING_R - 3.4f > PB_INFO_Y1, "badge ring below the info band");
 }
 
 // 球落在发球道底板上应当静止(地板 restitution=0)。
@@ -159,6 +220,7 @@ static void test_launch_reaches_playfield(void) {
 
 int main(void) {
     test_table_sane();
+    test_spec_layout();
     test_ball_rests_on_floor();
     test_wall_bounce();
     test_gate_one_way();
