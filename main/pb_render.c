@@ -36,16 +36,23 @@ typedef struct {
     lv_obj_t *lane[PB_ART_LANE_COUNT];
     lv_obj_t *tgt[PB_ART_TGT_COUNT];
     lv_obj_t *sling[PB_ART_SLING_COUNT];
+    lv_obj_t *hole;                         // 虫洞光环(2 帧换)
     lv_obj_t *flip[2];
+    lv_obj_t *shadow;                       // 球影(贴在球下)
     lv_obj_t *ball;
     lv_obj_t *plunger;                      // 蓄力条
     lv_obj_t *lbl_score;
     lv_obj_t *lbl_ball;
     lv_obj_t *lbl_mult;
     lv_obj_t *lbl_msg;
-    lv_obj_t *overlay;                      // 标题/结算浮层
+    lv_obj_t *popup_lbl[PB_POPUPS];         // 得分飘字
+    lv_obj_t *overlay;                      // 标题/结算/暂停浮层容器
+    lv_obj_t *info_card;                    // 标题/结算卡片
     lv_obj_t *lbl_ov_title;
     lv_obj_t *lbl_ov_sub;
+    lv_obj_t *lbl_blink;                    // PRESS OK / NEW HIGH SCORE 闪烁行
+    lv_obj_t *pause_card;                   // 暂停菜单卡片(金色边框明显区分)
+    lv_obj_t *lbl_pause_item[3];
 
     // 脏值缓存:任何 set_src/set_pos/set_text 都会让 LVGL 标脏重画,
     // 所以只有值真的变了才去碰 LVGL。
@@ -60,6 +67,11 @@ typedef struct {
     bool     last_msg_on;
     int      last_plunger_h;
     pb_state_t last_state;
+    uint8_t  last_pause_sel;
+    uint8_t  last_blink;
+    uint8_t  last_hole_frame;
+    bool     last_pop_on[PB_POPUPS];
+    uint32_t tick;                          // 帧计数:闪烁动画相位
     bool     primed;
 } pb_render_t;
 
@@ -97,8 +109,9 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(R.overlay, LV_OPA_90, 0);
 
     // 中央不透明卡片:完全压住背后的台面花纹,文字才有对比度。
-    // 高度按"标题 20 号 + 副标题 3 行 14 号"预算,不靠自动折行堆高度。
+    // 高度按"标题 20 号 + 副标题 3 行 14 号 + 闪烁行"预算。
     lv_obj_t *card = lv_obj_create(R.overlay);
+    R.info_card = card;
     lv_obj_remove_style_all(card);
     lv_obj_set_size(card, 216, 148);
     lv_obj_align(card, LV_ALIGN_CENTER, 0, 0);
@@ -124,7 +137,53 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_set_style_text_font(R.lbl_ov_sub, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(R.lbl_ov_sub, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_line_space(R.lbl_ov_sub, 4, 0);
-    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_BOTTOM_MID, 0, -34);
+
+    // 底部闪烁行:标题页 PRESS OK / 结算页新纪录提示
+    R.lbl_blink = lv_label_create(card);
+    lv_obj_set_style_text_font(R.lbl_blink, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(R.lbl_blink, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(R.lbl_blink, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_add_flag(R.lbl_blink, LV_OBJ_FLAG_HIDDEN);
+
+    // 暂停菜单卡片:金色边框 + 大字选项,与台面小字/信息卡片明显区分。
+    lv_obj_t *pc = lv_obj_create(R.overlay);
+    R.pause_card = pc;
+    lv_obj_remove_style_all(pc);
+    lv_obj_set_size(pc, 216, 170);
+    lv_obj_align(pc, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(pc, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(pc, lv_color_hex(0x0d1020), 0);
+    lv_obj_set_style_bg_opa(pc, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(pc, lv_color_hex(C_SCORE), 0);
+    lv_obj_set_style_border_width(pc, 2, 0);
+    lv_obj_set_style_radius(pc, 10, 0);
+
+    lv_obj_t *ttl = lv_label_create(pc);
+    lv_obj_set_style_text_color(ttl, lv_color_hex(C_SCORE), 0);
+    lv_obj_set_style_text_font(ttl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(ttl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(ttl, LV_ALIGN_TOP_MID, 0, 10);
+    lv_label_set_text(ttl, "PAUSED");
+
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *it = lv_label_create(pc);
+        lv_obj_set_size(it, 170, 28);
+        lv_obj_align(it, LV_ALIGN_TOP_MID, 0, 44 + i * 32);
+        lv_obj_set_style_text_align(it, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(it, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_radius(it, 5, 0);
+        lv_obj_set_style_bg_color(it, lv_color_hex(C_SCORE), 0);
+        lv_obj_set_style_pad_top(it, 5, 0);
+        R.lbl_pause_item[i] = it;
+    }
+
+    lv_obj_t *hint = lv_label_create(pc);
+    lv_obj_set_style_text_color(hint, lv_color_hex(0x8a97ab), 0);
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_label_set_text(hint, "UP/DOWN: SELECT  OK: GO");
 }
 
 void pb_render_build(pb_game *g, lv_obj_t *parent) {
@@ -147,6 +206,9 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     for (int i = 0; i < PB_ART_BUMP_COUNT; i++)
         R.bump[i] = mk_img(parent, pb_img_bump[i][0], pb_bump_pos[i][0], pb_bump_pos[i][1]);
 
+    // 虫洞光环(洞心处,吸入时换亮帧)
+    R.hole = mk_img(parent, pb_img_hole[0], pb_hole_pos[0], pb_hole_pos[1]);
+
     // 挡板:帧 0 = 静止角
     for (int i = 0; i < 2; i++) {
         R.flip[i] = mk_img(parent, pb_img_flip[i][0],
@@ -154,7 +216,9 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
                            (int)g->table.flippers[i].pivot.y + pb_flip_ofs[i][0][1]);
     }
 
-    // 球
+    // 球影(先建,压在球下面)+ 球
+    R.shadow = mk_img(parent, &pb_img_shadow, 0, 0);
+    lv_obj_add_flag(R.shadow, LV_OBJ_FLAG_HIDDEN);
     R.ball = mk_img(parent, &pb_img_ball, 0, 0);
     lv_obj_add_flag(R.ball, LV_OBJ_FLAG_HIDDEN);
 
@@ -188,6 +252,15 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     lv_label_set_text(R.lbl_msg, "");
     lv_obj_add_flag(R.lbl_msg, LV_OBJ_FLAG_HIDDEN);
 
+    // 得分飘字(命中点向上飘 + 渐隐)
+    for (int i = 0; i < PB_POPUPS; i++) {
+        R.popup_lbl[i] = lv_label_create(parent);
+        lv_obj_set_style_text_color(R.popup_lbl[i], lv_color_hex(C_SCORE), 0);
+        lv_obj_set_style_text_font(R.popup_lbl[i], &lv_font_montserrat_14, 0);
+        lv_obj_add_flag(R.popup_lbl[i], LV_OBJ_FLAG_HIDDEN);
+        R.last_pop_on[i] = false;
+    }
+
     build_overlay(parent);
 }
 
@@ -207,6 +280,7 @@ static int flipper_frame(const pb_flipper *f) {
 
 void pb_render_sync(pb_game *g) {
     const bool force = !R.primed;
+    R.tick++;                                   // 闪烁动画相位
 
     // 分数/球数/倍率:文本变了才重写(每次 set_text_fmt 都会重分配 + 标脏)
     if (force || g->score != R.last_score) {
@@ -226,8 +300,13 @@ void pb_render_sync(pb_game *g) {
     const pb_ball *b = &g->table.world.ball;
     if (b->active != R.last_ball_active) {
         R.last_ball_active = b->active;
-        if (b->active) lv_obj_clear_flag(R.ball, LV_OBJ_FLAG_HIDDEN);
-        else           lv_obj_add_flag(R.ball, LV_OBJ_FLAG_HIDDEN);
+        if (b->active) {
+            lv_obj_clear_flag(R.ball, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(R.shadow, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(R.ball, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(R.shadow, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     if (b->active) {
         int bx = (int)b->pos.x + pb_ball_ofs[0];
@@ -236,7 +315,18 @@ void pb_render_sync(pb_game *g) {
             R.last_ball_x = bx;
             R.last_ball_y = by;
             lv_obj_set_pos(R.ball, bx, by);
+            // 球影贴着球一起挪:两精灵锚点都是相对球心的,直接用偏移差
+            lv_obj_set_pos(R.shadow,
+                           bx + (pb_shadow_ofs[0] - pb_ball_ofs[0]),
+                           by + (pb_shadow_ofs[1] - pb_ball_ofs[1]));
         }
+    }
+
+    // 虫洞光环:吸入/弹出期间换亮帧
+    int hole_fr = (g->flash_hole > 0 || g->hole_timer > 0) ? 1 : 0;
+    if (force || hole_fr != (int)R.last_hole_frame) {
+        R.last_hole_frame = (uint8_t)hole_fr;
+        lv_image_set_src(R.hole, pb_img_hole[hole_fr]);
     }
 
     // 挡板:帧号变了才换 src + 挪位置(静止时完全不碰 LVGL)
@@ -317,25 +407,98 @@ void pb_render_sync(pb_game *g) {
         }
     }
 
-    // 标题/结算浮层:只在状态切换时重建文本
+    // 得分飘字:激活时写文本,存活期内上飘 + 渐隐(寿命 0.8s,与 pb_game.c 一致)
+    for (int i = 0; i < PB_POPUPS; i++) {
+        const pb_popup *p = &g->popups[i];
+        bool on = p->t > 0;
+        if (on && !R.last_pop_on[i]) {
+            R.last_pop_on[i] = true;
+            lv_label_set_text_fmt(R.popup_lbl[i], "+%lu", (unsigned long)p->value);
+            lv_obj_clear_flag(R.popup_lbl[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        if (on) {
+            float k = 1.0f - p->t / 0.8f;                   // 0(出生)->1(消散)
+            lv_obj_set_pos(R.popup_lbl[i], p->x - 20, (int)(p->y - 8.0f - 16.0f * k));
+            static const lv_opa_t fade[5] =
+                { LV_OPA_80, LV_OPA_60, LV_OPA_40, LV_OPA_20, LV_OPA_10 };
+            int idx = (int)(k * 4.99f);
+            if (idx < 0) idx = 0;
+            if (idx > 4) idx = 4;
+            lv_obj_set_style_text_opa(R.popup_lbl[i], fade[idx], 0);
+        } else if (R.last_pop_on[i]) {
+            R.last_pop_on[i] = false;
+            lv_obj_add_flag(R.popup_lbl[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // 标题/结算/暂停浮层:状态切换时重建文本
     if (force || g->state != R.last_state) {
         R.last_state = g->state;
-        if (g->state == PB_STATE_TITLE || g->state == PB_STATE_OVER) {
+        R.last_blink = 0xFF;                    // 闪烁行强制按新状态重建
+        bool show_info = (g->state == PB_STATE_TITLE || g->state == PB_STATE_OVER);
+        bool show_pause = (g->state == PB_STATE_PAUSE);
+        if (show_info || show_pause) {
             lv_obj_clear_flag(R.overlay, LV_OBJ_FLAG_HIDDEN);
-            if (g->state == PB_STATE_TITLE) {
-                lv_label_set_text(R.lbl_ov_title, "SPACE PINBALL");
-                lv_label_set_text_fmt(R.lbl_ov_sub,
-                    "HIGH %lu\n"
-                    "UP/DOWN: FLIPPER\n"
-                    "OK: LAUNCH   HOLD: EXIT",
-                    (unsigned long)g->high_score);
+            if (show_info) {
+                lv_obj_clear_flag(R.info_card, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(R.pause_card, LV_OBJ_FLAG_HIDDEN);
+                if (g->state == PB_STATE_TITLE) {
+                    lv_label_set_text(R.lbl_ov_title, "SPACE PINBALL");
+                    lv_label_set_text_fmt(R.lbl_ov_sub,
+                        "HIGH %lu\n"
+                        "UP/DOWN: FLIPPER\n"
+                        "HOLD OK: PAUSE",
+                        (unsigned long)g->high_score);
+                } else {
+                    lv_label_set_text(R.lbl_ov_title, "GAME OVER");
+                    // PRESS ANY KEY / NEW HIGH 挪到闪烁行,这里只留两行成绩
+                    lv_label_set_text_fmt(R.lbl_ov_sub, "SCORE %lu\nHIGH %lu",
+                                          (unsigned long)g->score,
+                                          (unsigned long)g->high_score);
+                }
             } else {
-                lv_label_set_text(R.lbl_ov_title, "GAME OVER");
-                lv_label_set_text_fmt(R.lbl_ov_sub, "SCORE %lu\nHIGH %lu\nPRESS ANY KEY",
-                                      (unsigned long)g->score, (unsigned long)g->high_score);
+                // 暂停卡片金色边框 + 大字菜单,和台面/信息卡片一眼区分
+                lv_obj_add_flag(R.info_card, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(R.pause_card, LV_OBJ_FLAG_HIDDEN);
             }
         } else {
             lv_obj_add_flag(R.overlay, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // 暂停菜单选中项:金底黑字 vs 透明底白字
+    if (force || (g->state == PB_STATE_PAUSE && g->pause_sel != R.last_pause_sel)) {
+        R.last_pause_sel = g->pause_sel;
+        static const char *const items[3] = { "RESUME", "RESTART", "EXIT TO TITLE" };
+        for (int i = 0; i < 3; i++) {
+            lv_obj_t *it = R.lbl_pause_item[i];
+            lv_label_set_text(it, items[i]);
+            bool sel = (i == g->pause_sel);
+            lv_obj_set_style_bg_opa(it, sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+            lv_obj_set_style_text_color(it,
+                lv_color_hex(sel ? 0x10141e : 0xdde8f5), 0);
+        }
+    }
+
+    // 闪烁行:标题页 PRESS OK / 结算页新纪录
+    if (g->state == PB_STATE_TITLE || g->state == PB_STATE_OVER) {
+        uint8_t blink = (uint8_t)((R.tick / 24) & 1);       // ~0.4s 相位
+        if (blink != R.last_blink) {
+            R.last_blink = blink;
+            if (g->state == PB_STATE_TITLE) {
+                lv_label_set_text(R.lbl_blink, "PRESS OK TO START");
+                lv_obj_set_style_text_color(R.lbl_blink,
+                    lv_color_hex(blink ? C_SCORE : 0x303a4c), 0);
+            } else if (g->new_high) {
+                lv_label_set_text(R.lbl_blink, "NEW HIGH SCORE!");
+                lv_obj_set_style_text_color(R.lbl_blink,
+                    lv_color_hex(blink ? C_SCORE : 0xf5f5f5), 0);
+            } else {
+                lv_label_set_text(R.lbl_blink, "PRESS ANY KEY");
+                lv_obj_set_style_text_color(R.lbl_blink,
+                    lv_color_hex(blink ? 0xdde8f5 : 0x5a6a84), 0);
+            }
+            lv_obj_clear_flag(R.lbl_blink, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
