@@ -59,9 +59,10 @@ static void key_poll(void) {
         } else { pend = z; cnt = 1; }
     } else { pend = KEY_ZONE_NONE; cnt = 0; }
 
-    // OK 长按 1.5s → 退回标题(等价原来的 LONG 事件)
+    // OK 长按 1.2s → 呼出暂停菜单。阈值要明显大于蓄力发射的 0.9s 满力时间,
+    // 否则蓄力时手一慢就弹菜单。
     if (cur == 2) {
-        if (!long_sent && ++ok_hold > 94) {
+        if (!long_sent && ++ok_hold > 72) {
             long_sent = true;
             pb_game_key(&s_game, PB_KEY_OK, PB_EV_LONG);
         }

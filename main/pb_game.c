@@ -19,15 +19,40 @@
 #define SCORE_BANK   5000
 #define SCORE_LANE   100
 #define SCORE_MULT   2500
+#define SCORE_HOLE   5000
+
+// 伪随机(虫洞弹出车道用,确定性即可)。
+static uint32_t rnd32(void) {
+    static uint32_t s = 0x9e3779b9u;
+    s = s * 1664525u + 1013904223u;
+    return s >> 8;
+}
 
 static void show_msg(pb_game *g, const char *txt, float dur) {
     snprintf(g->msg, sizeof(g->msg), "%s", txt);
     g->msg_timer = dur;
 }
 
-static void add_score(pb_game *g, uint32_t base) {
-    g->score += base * g->mult;
+// 返回实际得分(含倍率),命中点飘字直接显示这个值。
+static uint32_t add_score(pb_game *g, uint32_t base) {
+    uint32_t v = base * g->mult;
+    g->score += v;
     if (g->score > 9999999u) g->score = 9999999u;
+    return v;
+}
+
+// 在命中点登记一条得分飘字(无空闲槽则丢弃最不重要的:直接不显)。
+static void popup(pb_game *g, uint32_t v, float x, float y) {
+    for (int i = 0; i < PB_POPUPS; i++) {
+        pb_popup *p = &g->popups[i];
+        if (p->t <= 0) {
+            p->t = 0.8f;
+            p->x = (int16_t)x;
+            p->y = (int16_t)y;
+            p->value = v;
+            return;
+        }
+    }
 }
 
 // ---- 输入事件队列 ----
@@ -79,6 +104,12 @@ static void new_game(pb_game *g) {
     g->score = 0;
     g->ball_num = 1;
     g->ball_save = 0;
+    g->bump_combo = 0;
+    g->new_high = false;
+    g->hole_timer = 0;
+    g->hole_cooldown = 0;
+    g->flash_hole = 0;
+    for (int i = 0; i < PB_POPUPS; i++) g->popups[i].t = 0;
     reset_playfield(g);
     spawn_ball_in_lane(g);
     g->state = PB_STATE_LAUNCH;
@@ -140,14 +171,16 @@ static void on_target(pb_game *g, int idx) {
     g->target_down[idx] = true;
     int s = pb_table_target_seg(&g->table, idx);
     if (s >= 0) g->table.segs[s].solid = false;
-    add_score(g, SCORE_TARGET);
+    uint32_t got = add_score(g, SCORE_TARGET);
+    popup(g, got, g->table.world.ball.pos.x, g->table.world.ball.pos.y - 10.0f);
     g->flash_target[idx] = 0.3f;
     pb_audio_play(PB_SND_TARGET);
 
     bool all = true;
     for (int i = 0; i < PB_TARGET_COUNT; i++) all &= g->target_down[i];
     if (all) {
-        add_score(g, SCORE_BANK);
+        uint32_t got = add_score(g, SCORE_BANK);
+        popup(g, got, g->table.world.ball.pos.x, g->table.world.ball.pos.y - 12.0f);
         show_msg(g, "BONUS 5000", 2.0f);
         g->target_reset = 1.2f;                 // 稍后整组立起
         pb_audio_play(PB_SND_BONUS);
@@ -156,6 +189,7 @@ static void on_target(pb_game *g, int idx) {
 
 static void on_drain(pb_game *g) {
     g->table.world.ball.active = false;
+    g->bump_combo = 0;                  // 连击随球结束
     if (g->ball_save > 0) {
         spawn_ball_in_lane(g);
         g->state = PB_STATE_LAUNCH;
@@ -175,6 +209,8 @@ void pb_game_step(pb_game *g, float dt) {
     g->state_timer += dt;
     if (g->msg_timer > 0) g->msg_timer -= dt;
     if (g->ball_save > 0) g->ball_save -= dt;
+    for (int i = 0; i < PB_POPUPS; i++)
+        if (g->popups[i].t > 0) g->popups[i].t -= dt;
     for (int i = 0; i < g->table.circle_count && i < PB_CIRCLE_MAX; i++)
         if (g->flash_circle[i] > 0) g->flash_circle[i] -= dt;
     for (int i = 0; i < PB_TARGET_COUNT; i++)
@@ -197,13 +233,26 @@ void pb_game_step(pb_game *g, float dt) {
     pb_key_t key; pb_key_ev_t ev;
     while (ev_pop(g, &key, &ev)) {
         if (key == PB_KEY_OK && ev == PB_EV_LONG) {
-            // 任意状态长按 OK 退回标题(结算/标题页无效)
+            // 长按 OK 呼出暂停菜单(进行中状态);标题/结算页无效
             if (g->state == PB_STATE_PLAY || g->state == PB_STATE_LAUNCH) {
-                g->table.world.ball.active = false;
-                g->state = PB_STATE_TITLE;
+                g->paused_prev = g->state;
+                g->pause_sel = 0;
+                g->state = PB_STATE_PAUSE;
                 g->state_timer = 0;
                 continue;
             }
+        }
+        // 暂停菜单:UP/DOWN 移动选项,OK 确认
+        if (g->state == PB_STATE_PAUSE) {
+            if (ev != PB_EV_PRESS) continue;
+            if (key == PB_KEY_L)     g->pause_sel = (uint8_t)((g->pause_sel + 2) % 3);
+            else if (key == PB_KEY_R) g->pause_sel = (uint8_t)((g->pause_sel + 1) % 3);
+            else if (key == PB_KEY_OK) {
+                if (g->pause_sel == 0)       g->state = g->paused_prev;   // RESUME
+                else if (g->pause_sel == 1)  new_game(g);                // RESTART
+                else { g->state = PB_STATE_TITLE; g->state_timer = 0; }  // EXIT
+            }
+            continue;
         }
         // 只响应按下事件,避免长按 OK 退出后的抬起事件误触发新游戏
         if (g->state == PB_STATE_TITLE && g->state_timer > 0.4f && ev == PB_EV_PRESS) {
@@ -266,7 +315,7 @@ void pb_game_step(pb_game *g, float dt) {
         }
 
         // 防卡死:低速滞留(顶弧夹角/柱缝)1.2s 后斜向给一记救球冲量。
-        // 只在挡板区以上生效——球停在放下挡板上等击球是正常状态。
+        // 只在挡板区以上生效——球停在放下的挡板上等击球是正常状态。
         if (b->active) {
             float sp2 = b->vel.x * b->vel.x + b->vel.y * b->vel.y;
             if (sp2 < 900.0f && b->pos.y < 230.0f) {
@@ -282,16 +331,50 @@ void pb_game_step(pb_game *g, float dt) {
             }
         }
 
+        // 中央虫洞:球滚进洞心被捕获,大额得分后从随机车道口弹出。
+        // 冷却期防刚弹出就被吸回。
+        if (g->flash_hole > 0) g->flash_hole -= dt;
+        if (g->hole_cooldown > 0) {
+            g->hole_cooldown -= dt;
+        } else if (b->active) {
+            float hx = b->pos.x - PB_HOLE_X, hy = b->pos.y - PB_HOLE_Y;
+            if (hx * hx + hy * hy < PB_HOLE_R * PB_HOLE_R) {
+                float px = b->pos.x, py = b->pos.y;
+                b->active = false;
+                uint32_t got = add_score(g, SCORE_HOLE);
+                popup(g, got, px, py - 10.0f);
+                show_msg(g, "WORMHOLE!", 1.5f);
+                g->flash_hole = 0.9f;
+                g->hole_timer = 0.9f;
+                pb_audio_play(PB_SND_BONUS);
+            }
+        }
+        if (g->hole_timer > 0) {
+            g->hole_timer -= dt;
+            if (g->hole_timer <= 0) {
+                g->hole_lane = (uint8_t)(rnd32() % PB_LANE_COUNT);
+                b->pos.x = g->table.lane_x[g->hole_lane];
+                b->pos.y = 56.0f;
+                b->vel.x = 0;
+                b->vel.y = 60.0f;
+                b->active = true;
+                g->hole_cooldown = 4.0f;
+            }
+        }
+
         if (hit.circle >= 0) {
-            add_score(g, SCORE_BUMP);
+            if (g->bump_combo < 5) g->bump_combo++;     // 连击:分值随本球内命中数递增
+            uint32_t got = add_score(g, SCORE_BUMP * g->bump_combo);
             g->flash_circle[hit.circle] = 0.25f;
+            popup(g, got, b->pos.x, b->pos.y - 10.0f);
             pb_audio_play(PB_SND_BUMP);
         }
         if (hit.seg >= 0) {
             uint8_t kind = g->table.kind[hit.seg];
             if (kind == PB_SEG_SLING) {
-                add_score(g, SCORE_SLING);
+                uint32_t got = add_score(g, SCORE_SLING);
                 g->flash_sling = 0.25f;
+                popup(g, got, b->pos.x, b->pos.y - 8.0f);
                 pb_audio_play(PB_SND_SLING);
             } else if (kind == PB_SEG_TARGET) {
                 for (int i = 0; i < PB_TARGET_COUNT; i++)
@@ -305,7 +388,10 @@ void pb_game_step(pb_game *g, float dt) {
             if (g->ball_num >= PB_BALLS_TOTAL) {
                 if (g->score > g->high_score) {
                     g->high_score = g->score;
+                    g->new_high = true;
                     pb_game_nvs_save(g);
+                } else {
+                    g->new_high = false;
                 }
                 g->state = PB_STATE_OVER;
                 pb_audio_play(PB_SND_OVER);

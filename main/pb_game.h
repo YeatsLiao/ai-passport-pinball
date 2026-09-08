@@ -26,6 +26,7 @@ typedef enum {
     PB_STATE_PLAY,      // 球在台面
     PB_STATE_DRAIN,     // 掉落过场
     PB_STATE_OVER,      // 结算
+    PB_STATE_PAUSE,     // 暂停菜单(长按 OK 呼出,UP/DOWN 选择,OK 确认)
 } pb_state_t;
 
 // 音效事件(实现在 pb_audio.c,设备侧)。
@@ -40,6 +41,14 @@ void pb_audio_play(pb_snd_t snd);
 #define PB_BALLS_TOTAL 3
 #define PB_MULT_MAX 5
 #define PB_BALL_SAVE_S 8.0f
+
+// 命中点得分飘字(向上飘 + 渐隐,渲染层读取绘制)。
+#define PB_POPUPS 3
+typedef struct {
+    float t;            // 剩余寿命秒数,<=0 空闲
+    int16_t x, y;       // 屏幕坐标(命中点)
+    uint32_t value;     // 显示 +<value>
+} pb_popup;
 
 typedef struct {
     pb_table table;
@@ -64,6 +73,21 @@ typedef struct {
     float flash_sling;
     float stuck_time;               // 低速滞留计时(防卡死救球用)
     bool stuck_side;                // 救球冲量左右交替
+
+    // 中央虫洞:捕获计时/冷却/吸入闪光,弹出车道与冷却期防回吸。
+    float hole_timer;
+    float hole_cooldown;
+    float flash_hole;
+    uint8_t hole_lane;
+    uint8_t bump_combo;             // 本球内 bumper 连击(分值递增,掉球重置)
+
+    // 得分飘字槽
+    pb_popup popups[PB_POPUPS];
+
+    // 暂停菜单
+    pb_state_t paused_prev;         // 呼出前的状态(RESUME 回去)
+    uint8_t pause_sel;              // 0=RESUME 1=RESTART 2=EXIT
+    bool new_high;                  // 本局刷新纪录(结算页闪烁提示用)
 
     // 输入事件环形队列(按键回调单生产者,游戏步进单消费者)。
     volatile uint8_t ev_head, ev_tail;
