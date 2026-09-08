@@ -13,13 +13,25 @@
 #define NVS_KEY  "hs"
 
 // ---- 计分表(对标原版量级) ----
-#define SCORE_BUMP   1000
-#define SCORE_SLING  250
-#define SCORE_TARGET 500
-#define SCORE_BANK   5000
-#define SCORE_LANE   100
+#define SCORE_BUMP   500        // x 连击档位 1..4 → 500/1000/1500/2000(原版递进)
+#define SCORE_SLING  500
+#define SCORE_TARGET 1500
+#define SCORE_BANK   50000
+#define SCORE_LANE   2000
 #define SCORE_MULT   2500
-#define SCORE_HOLE   5000
+#define SCORE_HOLE   2500      // x 虫洞连击 1..3 → 2500/5000/7500(原版 sink 表)
+#define SCORE_RANK   10000     // x 新军衔(满环晋升奖)
+#define SCORE_FUELMAX 25000     // 封顶军衔后满环奖
+
+// hyperspace 递进表(原版 kickout_score1 的五级取四档)
+static const uint32_t HS_SCORES[4] = { 10000, 20000, 50000, 150000 };
+// 军衔缩写(面板宽 42px,全名放不下)
+static const char *const RANK_NAMES[5] = { "CDT", "ENS", "LT", "CPT", "ADM" };
+
+const char *pb_rank_name(uint8_t rank) {
+    if (rank < 1 || rank > 5) rank = 1;
+    return RANK_NAMES[rank - 1];
+}
 
 // 伪随机(虫洞弹出车道用,确定性即可)。
 static uint32_t rnd32(void) {
@@ -53,6 +65,26 @@ static void popup(pb_game *g, uint32_t v, float x, float y) {
             return;
         }
     }
+}
+
+// 点亮一盏燃料灯;满环晋升军衔(对标原版 fuel bargraph → rank 晋升)。
+static void add_fuel(pb_game *g) {
+    if (g->fuel_lit < PB_FUEL_COUNT) g->fuel_lit++;
+    if (g->fuel_lit < PB_FUEL_COUNT) return;
+    g->fuel_lit = 0;
+    char buf[20];
+    if (g->rank < 5) {
+        g->rank++;
+        uint32_t got = add_score(g, SCORE_RANK * g->rank);
+        popup(g, got, PB_FUEL_CX, PB_FUEL_CY - 40.0f);
+        snprintf(buf, sizeof(buf), "PROMOTION! %s", pb_rank_name(g->rank));
+    } else {
+        uint32_t got = add_score(g, SCORE_FUELMAX);
+        popup(g, got, PB_FUEL_CX, PB_FUEL_CY - 40.0f);
+        snprintf(buf, sizeof(buf), "FUEL BONUS");
+    }
+    show_msg(g, buf, 2.0f);
+    pb_audio_play(PB_SND_BONUS);
 }
 
 // ---- 输入事件队列 ----
@@ -112,6 +144,13 @@ static void new_game(pb_game *g) {
     g->flash_hole = 0;
     g->stuck_time = 0;
     g->lost_time = 0;
+    g->wh_chain = 0;
+    g->hs_chain = 0;
+    g->bump_hits = 0;
+    g->side_timer = 0;
+    g->side_cooldown = 0;
+    g->hs_timer = 0;
+    g->hs_cooldown = 0;
     for (int i = 0; i < PB_POPUPS; i++) g->popups[i].t = 0;
     reset_playfield(g);
     spawn_ball_in_lane(g);
@@ -126,6 +165,7 @@ void pb_game_init(pb_game *g) {
     g->state = PB_STATE_TITLE;
     g->state_timer = 0;
     g->mult = 1;
+    g->rank = 1;                    // 军衔/燃料跨局保留在内存,冷启动回新兵
 }
 
 void pb_game_nvs_load(pb_game *g) {
@@ -177,6 +217,7 @@ static void on_target(pb_game *g, int idx) {
     uint32_t got = add_score(g, SCORE_TARGET);
     popup(g, got, g->table.world.ball.pos.x, g->table.world.ball.pos.y - 10.0f);
     g->flash_target[idx] = 0.3f;
+    add_fuel(g);                        // 放倒目标点一盏燃料灯
     pb_audio_play(PB_SND_TARGET);
 
     bool all = true;
@@ -197,6 +238,10 @@ static void on_drain(pb_game *g) {
     g->hole_timer = 0;
     g->flash_hole = 0;
     g->lost_time = 0;
+    g->side_timer = 0;
+    g->hs_timer = 0;
+    g->wh_chain = 0;
+    g->hs_chain = 0;
     if (g->ball_save > 0) {
         g->ball_save = 0;               // 每球只保一次:耗尽,防 8s 窗口内循环重发
         g->ball_save_used = true;
@@ -359,21 +404,61 @@ void pb_game_step(pb_game *g, float dt) {
             }
         }
 
-        // 中央虫洞:球滚进洞心被捕获,大额得分后从随机车道口弹出。
-        // 冷却期防刚弹出就被吸回。
+        // 球落回挡板区 = 虫洞/hyperspace 连击结束(对标原版球归底重置)
+        if (b->active && b->pos.y > 265.0f) {
+            g->wh_chain = 0;
+            g->hs_chain = 0;
+        }
+
+        // --- 洞系计时与冷却 ---
         if (g->flash_hole > 0) g->flash_hole -= dt;
-        if (g->hole_cooldown > 0) {
-            g->hole_cooldown -= dt;
-        } else if (b->active) {
+        if (g->hole_cooldown > 0) g->hole_cooldown -= dt;
+        if (g->side_cooldown > 0) g->side_cooldown -= dt;
+        if (g->hs_cooldown > 0) g->hs_cooldown -= dt;
+
+        // 中央黑洞:球滚进洞心被捕获,连击分后从随机车道口弹出。
+        if (g->hole_cooldown <= 0 && b->active) {
             float hx = b->pos.x - PB_HOLE_X, hy = b->pos.y - PB_HOLE_Y;
             if (hx * hx + hy * hy < PB_HOLE_R * PB_HOLE_R) {
                 float px = b->pos.x, py = b->pos.y;
                 b->active = false;
-                uint32_t got = add_score(g, SCORE_HOLE);
+                uint32_t got = add_score(g, SCORE_HOLE * (g->wh_chain + 1));
                 popup(g, got, px, py - 10.0f);
                 show_msg(g, "WORMHOLE!", 1.5f);
+                if (g->wh_chain < 2) g->wh_chain++;
                 g->flash_hole = 0.9f;
                 g->hole_timer = 0.9f;
+                pb_audio_play(PB_SND_BONUS);
+            }
+        }
+        // 左上虫洞入口:吞球后从黑洞口喷出(与黑洞构成双洞循环,连击共享)
+        if (g->side_cooldown <= 0 && b->active) {
+            float hx = b->pos.x - PB_HOLE2_X, hy = b->pos.y - PB_HOLE2_Y;
+            if (hx * hx + hy * hy < PB_HOLE2_R * PB_HOLE2_R) {
+                float px = b->pos.x, py = b->pos.y;
+                b->active = false;
+                uint32_t got = add_score(g, SCORE_HOLE * (g->wh_chain + 1));
+                popup(g, got, px, py + 12.0f);
+                show_msg(g, "WORMHOLE!", 1.5f);
+                if (g->wh_chain < 2) g->wh_chain++;
+                g->side_timer = 0.8f;
+                g->side_cooldown = 4.0f;
+                g->hole_cooldown = 2.5f;    // 喷出口(黑洞)防立即回吸
+                pb_audio_play(PB_SND_BONUS);
+            }
+        }
+        // 右上 hyperspace kick-out:吞球保持后吐回,连击递进(对标原版五级奖)
+        if (g->hs_cooldown <= 0 && b->active) {
+            float hx = b->pos.x - PB_HS_X, hy = b->pos.y - PB_HS_Y;
+            if (hx * hx + hy * hy < PB_HS_R * PB_HS_R) {
+                float px = b->pos.x, py = b->pos.y;
+                b->active = false;
+                uint32_t got = add_score(g, HS_SCORES[g->hs_chain]);
+                popup(g, got, px - 4.0f, py + 12.0f);
+                show_msg(g, "HYPERSPACE!", 1.5f);
+                if (g->hs_chain < 3) g->hs_chain++;
+                g->hs_timer = 0.8f;
+                g->hs_cooldown = 3.0f;
                 pb_audio_play(PB_SND_BONUS);
             }
         }
@@ -388,9 +473,30 @@ void pb_game_step(pb_game *g, float dt) {
                 b->active = true;
                 g->hole_cooldown = 4.0f;
             }
-        } else if (!b->active) {
-            // 丢球保险:球不活跃又不在虫洞过场(任何漏网路径),2.2s 后按掉球处理,
-            // 杜绝"球消失且球数不变"的假死局面。
+        }
+        if (g->side_timer > 0) {
+            g->side_timer -= dt;
+            if (g->side_timer <= 0) {
+                b->pos.x = PB_HOLE_X;
+                b->pos.y = PB_HOLE_Y - 16.0f;
+                b->vel.x = (float)(rnd32() % 120) - 60.0f;
+                b->vel.y = -300.0f;
+                b->active = true;
+            }
+        }
+        if (g->hs_timer > 0) {
+            g->hs_timer -= dt;
+            if (g->hs_timer <= 0) {
+                b->pos.x = PB_HS_X;
+                b->pos.y = PB_HS_Y + 10.0f;
+                b->vel.x = -40.0f;
+                b->vel.y = 200.0f;
+                b->active = true;
+            }
+        }
+        // 丢球保险:球不活跃且三个洞过场全空闲(任何漏网路径),2.2s 后按掉球处理,
+        // 杜绝"球消失且球数不变"的假死局面。
+        if (!b->active && g->hole_timer <= 0 && g->side_timer <= 0 && g->hs_timer <= 0) {
             g->lost_time += dt;
             if (g->lost_time > 2.2f) {
                 g->lost_time = 0;
@@ -403,10 +509,15 @@ void pb_game_step(pb_game *g, float dt) {
 
         if (hit.circle >= 0) {
             if (g->bump_combo < 5) g->bump_combo++;     // 连击:分值随本球内命中数递增
-            uint32_t got = add_score(g, SCORE_BUMP * g->bump_combo);
+            int tier = g->bump_combo > 4 ? 4 : g->bump_combo;
+            uint32_t got = add_score(g, SCORE_BUMP * tier);
             g->flash_circle[hit.circle] = 0.25f;
             popup(g, got, b->pos.x, b->pos.y - 10.0f);
             pb_audio_play(PB_SND_BUMP);
+            if (++g->bump_hits >= 3) {                  // 每 3 次命中点一盏燃料灯
+                g->bump_hits = 0;
+                add_fuel(g);
+            }
         }
         if (hit.seg >= 0) {
             uint8_t kind = g->table.kind[hit.seg];

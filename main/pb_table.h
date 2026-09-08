@@ -52,6 +52,25 @@ typedef struct {
 #define PB_HOLE_Y 248.0f
 #define PB_HOLE_R 7.0f      // 捕获半径(洞口视觉半径 ~13)
 
+// 左上虫洞入口:外墙与左上轨道导轨之间的窄通道尽头(对标原版左上 sink),
+// 与中央黑洞构成双洞循环。通道净宽 ~16px,球(r4)可通过。
+#define PB_HOLE2_X 21.0f
+#define PB_HOLE2_Y 68.0f
+#define PB_HOLE2_R 5.0f     // 捕获半径(通道窄,洞视觉半径 ~6)
+
+// 右上 hyperspace kick-out 洞:发球道内墙与右上导轨之间的窄区,
+// 连续命中递进大奖(对标原版 hyperspace)。
+#define PB_HS_X 196.0f
+#define PB_HS_Y 68.0f
+#define PB_HS_R 5.0f
+
+// 燃料灯环:绕徽章外弧 5 盏(角度 150/120/90/60/30 度,半径 45),
+// pb_art.py 的灯座与渲染层的亮灯都从这组常量计算坐标,两边角度表必须一致。
+#define PB_FUEL_CX 107.0f
+#define PB_FUEL_CY 190.0f
+#define PB_FUEL_R  45.0f
+#define PB_FUEL_COUNT 5
+
 // 找第 i 个掉落目标 / 弹弓对应的线段索引(台面固定布局,顺序即语义)。
 int pb_table_target_seg(const pb_table *t, int i);
 int pb_table_sling_seg(const pb_table *t, int side);   // side: 0=左 1=右

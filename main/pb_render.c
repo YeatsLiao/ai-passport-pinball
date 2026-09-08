@@ -53,6 +53,11 @@ typedef struct {
     lv_obj_t *lbl_blink;                    // PRESS OK / NEW HIGH SCORE 闪烁行
     lv_obj_t *pause_card;                   // 暂停菜单卡片(金色边框明显区分)
     lv_obj_t *lbl_pause_item[3];
+    lv_obj_t *fuel_lamp[PB_FUEL_COUNT];     // 燃料灯点亮态圆点(叠在背景灯座上)
+    lv_obj_t *lbl_fuel;                     // FUEL 面板百分比
+    lv_obj_t *lbl_rank;                     // RANK 面板军衔
+    lv_obj_t *side_glow;                    // 左上洞吞球闪光
+    lv_obj_t *hs_glow;                      // hyperspace 洞吞球闪光
 
     // 脏值缓存:任何 set_src/set_pos/set_text 都会让 LVGL 标脏重画,
     // 所以只有值真的变了才去碰 LVGL。
@@ -71,6 +76,10 @@ typedef struct {
     uint8_t  last_blink;
     uint8_t  last_hole_frame;
     bool     last_pop_on[PB_POPUPS];
+    uint8_t  last_fuel_bits;
+    uint8_t  last_rank;
+    uint8_t  last_fuel_lit;
+    bool     last_side_glow, last_hs_glow;
     uint32_t tick;                          // 帧计数:闪烁动画相位
     bool     primed;
 } pb_render_t;
@@ -83,6 +92,19 @@ static lv_obj_t *mk_img(lv_obj_t *parent, const lv_image_dsc_t *dsc, int x, int 
     lv_obj_t *o = lv_image_create(parent);
     lv_image_set_src(o, dsc);
     lv_obj_set_pos(o, x, y);
+    return o;
+}
+
+// 洞口吞球闪光:半透明圆形光斑,默认隐藏,吞球过场期间显示
+static lv_obj_t *mk_glow(lv_obj_t *parent, float cx, float cy, uint32_t color) {
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, 18, 18);
+    lv_obj_set_pos(o, (int)cx - 9, (int)cy - 9);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_50, 0);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
     return o;
 }
 
@@ -265,6 +287,42 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
         lv_obj_add_flag(R.popup_lbl[i], LV_OBJ_FLAG_HIDDEN);
         R.last_pop_on[i] = false;
     }
+
+    // 燃料灯点亮态:小圆点叠在背景灯座上(角度表与 pb_art.py 一致)
+    for (int i = 0; i < PB_FUEL_COUNT; i++) {
+        float a = (150.0f - 30.0f * i) * 3.14159265f / 180.0f;
+        int lx = (int)(PB_FUEL_CX + PB_FUEL_R * cosf(a));
+        int ly = (int)(PB_FUEL_CY - PB_FUEL_R * sinf(a));
+        lv_obj_t *lamp = lv_obj_create(parent);
+        lv_obj_remove_style_all(lamp);
+        lv_obj_set_size(lamp, 7, 7);
+        lv_obj_set_pos(lamp, lx - 3, ly - 3);
+        lv_obj_set_style_radius(lamp, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(lamp, lv_color_hex(C_SCORE), 0);
+        lv_obj_set_style_bg_opa(lamp, LV_OPA_COVER, 0);
+        lv_obj_add_flag(lamp, LV_OBJ_FLAG_HIDDEN);
+        R.fuel_lamp[i] = lamp;
+    }
+
+    // FUEL/RANK 面板动态文字(背景只画了面板框和标题)
+    R.lbl_fuel = lv_label_create(parent);
+    lv_obj_set_width(R.lbl_fuel, 40);
+    lv_obj_set_style_text_align(R.lbl_fuel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(R.lbl_fuel, lv_color_hex(C_SCORE), 0);
+    lv_obj_set_style_text_font(R.lbl_fuel, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(R.lbl_fuel, 17, 205);
+    lv_label_set_text(R.lbl_fuel, "0%");
+    R.lbl_rank = lv_label_create(parent);
+    lv_obj_set_width(R.lbl_rank, 40);
+    lv_obj_set_style_text_align(R.lbl_rank, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(R.lbl_rank, lv_color_hex(C_SCORE), 0);
+    lv_obj_set_style_text_font(R.lbl_rank, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(R.lbl_rank, 157, 205);
+    lv_label_set_text(R.lbl_rank, pb_rank_name(1));
+
+    // 侧洞吞球闪光(蓝=虫洞入口 金=hyperspace)
+    R.side_glow = mk_glow(parent, PB_HOLE2_X, PB_HOLE2_Y, 0x6aa0f0);
+    R.hs_glow = mk_glow(parent, PB_HS_X, PB_HS_Y, 0xffc860);
 
     build_overlay(parent);
 }
@@ -505,6 +563,41 @@ void pb_render_sync(pb_game *g) {
             }
             lv_obj_clear_flag(R.lbl_blink, LV_OBJ_FLAG_HIDDEN);
         }
+    }
+
+    // 燃料灯 + FUEL/RANK 面板文字
+    uint8_t fuel_bits = 0;
+    for (int i = 0; i < PB_FUEL_COUNT; i++)
+        if (i < g->fuel_lit) fuel_bits |= (uint8_t)(1u << i);
+    if (force || fuel_bits != R.last_fuel_bits) {
+        for (int i = 0; i < PB_FUEL_COUNT; i++) {
+            bool on = (fuel_bits >> i) & 1;
+            bool was = (R.last_fuel_bits >> i) & 1;
+            if (force || on != was) {
+                if (on) lv_obj_clear_flag(R.fuel_lamp[i], LV_OBJ_FLAG_HIDDEN);
+                else    lv_obj_add_flag(R.fuel_lamp[i], LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        R.last_fuel_bits = fuel_bits;
+    }
+    if (force || g->fuel_lit != R.last_fuel_lit || g->rank != R.last_rank) {
+        R.last_fuel_lit = g->fuel_lit;
+        R.last_rank = g->rank;
+        lv_label_set_text_fmt(R.lbl_fuel, "%d%%", g->fuel_lit * 20);
+        lv_label_set_text(R.lbl_rank, pb_rank_name(g->rank));
+    }
+
+    // 侧洞吞球闪光
+    bool sg = g->side_timer > 0, hg = g->hs_timer > 0;
+    if (force || sg != R.last_side_glow) {
+        R.last_side_glow = sg;
+        if (sg) lv_obj_clear_flag(R.side_glow, LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(R.side_glow, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (force || hg != R.last_hs_glow) {
+        R.last_hs_glow = hg;
+        if (hg) lv_obj_clear_flag(R.hs_glow, LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(R.hs_glow, LV_OBJ_FLAG_HIDDEN);
     }
 
     R.primed = true;

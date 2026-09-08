@@ -452,8 +452,8 @@ def paint_decor(g, bed):
     pt.text_arc(cx, cy + 2, r - 8.5, "SPACE CADET", 218, 322, (198, 226, 255), 0.85)
     pt.text_c(cx, cy + r - 8, "MISSION READY", COL_GOLD, 1.0)
 
-    _plastic_panel(pt, 16, 198, 58, 230, "FUEL", "100%")
-    _plastic_panel(pt, 156, 198, 198, 230, "RANK", "CADET")
+    _plastic_panel(pt, 16, 198, 58, 230, "FUEL", None)      # 百分比由渲染层动态显示
+    _plastic_panel(pt, 156, 198, 198, 230, "RANK", None)    # 军衔由渲染层动态显示
 
     for dx in (-30, 0, 30):                    # 徽章上方的菱形灯插
         x, y = cx + dx, 143
@@ -640,6 +640,8 @@ def render_background(g):
     paint_lane_channel(g, img)
     paint_static_hardware(g, img)
     paint_black_hole(g, img)
+    paint_side_holes(g, img)
+    paint_fuel_lamps(g, img)
     paint_apron_and_drain(img)
     paint_glow_and_vignette(img)
 
@@ -847,6 +849,30 @@ def paint_black_hole(g, img):
     pt.arc(hx - 13.5, hy - 13.5, hx + 13.5, hy + 13.5, 200, 340, (96, 156, 235), 1.5)
     pt.arc(hx - 13.5, hy - 13.5, hx + 13.5, hy + 13.5, 20, 160, (52, 92, 165), 1.2)
     pt.circle(hx, hy, 8.6, outline=(24, 30, 44), w=0.8)
+
+
+def paint_side_holes(g, img):
+    """左上虫洞入口 + 右上 hyperspace 洞:窄通道里的小尺寸深洞(背景静态部分)。"""
+    pt = Painter(img)
+    for key, halo in (("hole2", (70, 120, 200)), ("hs_hole", (200, 150, 70))):
+        hx, hy = g[key]
+        for r, col in ((6.5, (9, 14, 26)), (5.5, (4, 6, 13)), (4.2, (1, 2, 5))):
+            pt.circle(hx, hy, r, fill=col)
+        pt.arc(hx - 6.5, hy - 6.5, hx + 6.5, hy + 6.5, 200, 340, halo, 1.1)
+
+
+def paint_fuel_lamps(g, img):
+    """燃料灯座:沿徽章外弧的暗灯(点亮态由渲染层的 LVGL 圆点叠加)。
+    角度表 150/120/90/60/30 必须与 pb_render.c 的 fuel 求值一致。"""
+    pt = Painter(img)
+    cx, cy, rad, n = g["fuel"]
+    for i in range(n):
+        a = math.radians(150.0 - 30.0 * i)
+        lx = cx + rad * math.cos(a)
+        ly = cy - rad * math.sin(a)
+        pt.circle(lx, ly, 3.4, fill=(7, 10, 18))
+        pt.circle(lx, ly, 2.6, fill=(36, 44, 60))
+        pt.circle(lx - 0.7, ly - 0.8, 0.8, fill=(70, 84, 104))
 
 
 def draw_hole_halo(pt, strong):

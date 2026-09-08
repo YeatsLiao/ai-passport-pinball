@@ -315,12 +315,17 @@ def main():
     args = ap.parse_args()
 
     g = A.parse_geometry(os.path.join(ROOT, "main", "pb_table.c"))
-    # 虫洞坐标的单一真相源在 pb_table.h,美术从这里同步。
+    # 洞系/燃料灯坐标的单一真相源在 pb_table.h,美术从这里同步。
     hsrc = open(os.path.join(ROOT, "main", "pb_table.h"), encoding="utf-8").read()
-    g["hole"] = (
-        float(re.search(r"#define PB_HOLE_X\s+([\d.]+)", hsrc).group(1)),
-        float(re.search(r"#define PB_HOLE_Y\s+([\d.]+)", hsrc).group(1)),
-    )
+
+    def hconst(name):
+        return float(re.search(r"#define %s\s+([\d.]+)" % name, hsrc).group(1))
+
+    g["hole"] = (hconst("PB_HOLE_X"), hconst("PB_HOLE_Y"))
+    g["hole2"] = (hconst("PB_HOLE2_X"), hconst("PB_HOLE2_Y"))
+    g["hs_hole"] = (hconst("PB_HS_X"), hconst("PB_HS_Y"))
+    g["fuel"] = (hconst("PB_FUEL_CX"), hconst("PB_FUEL_CY"),
+                 hconst("PB_FUEL_R"), int(hconst("PB_FUEL_COUNT")))
     print("解析几何: %d 线段, %d bumper, %d 挡板, %d 车道"
           % (len(g["segs"]), len(g["circles"]), len(g["flippers"]), len(g["lanes"])))
 

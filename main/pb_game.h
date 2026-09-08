@@ -83,6 +83,17 @@ typedef struct {
     uint8_t hole_lane;
     uint8_t bump_combo;             // 本球内 bumper 连击(分值递增,掉球重置)
 
+    // 原版化玩法:燃料灯/军衔/双洞虫洞连击/hyperspace 递进。
+    uint8_t fuel_lit;               // 已点亮燃料灯数 0..PB_FUEL_COUNT
+    uint8_t rank;                   // 军衔 1..5(1=CADET)
+    uint8_t bump_hits;              // bumper 命中计数(每 3 次点一盏燃料灯)
+    uint8_t wh_chain;               // 虫洞连击 0..3(球落回挡板区重置)
+    uint8_t hs_chain;               // hyperspace 连击 0..4
+    float side_timer;               // 左上洞吞球过场
+    float side_cooldown;            // 左上洞冷却(防与黑洞互传死循环)
+    float hs_timer;                 // hyperspace 洞吞球保持
+    float hs_cooldown;
+
     // 得分飘字槽
     pb_popup popups[PB_POPUPS];
 
@@ -105,5 +116,7 @@ void pb_game_nvs_save(pb_game *g);
 
 // 按键事件入口(可在任意任务/回调里调用,只入队不干活)。
 void pb_game_key(pb_game *g, pb_key_t key, pb_key_ev_t ev);
+// 军衔缩写名(1..5 → CDT/ENS/LT/CPT/ADM),渲染层面板文字用。
+const char *pb_rank_name(uint8_t rank);
 // 每帧推进。dt 秒;必须在 LVGL 任务的 lv_timer 里调用(渲染层同任务同步)。
 void pb_game_step(pb_game *g, float dt);
