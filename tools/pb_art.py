@@ -344,9 +344,9 @@ DRAIN_BOX = (72, 277, 142, 320)
 BEZEL_H = 26
 
 # 记分板预留区:LVGL 标签贴在这三块暗面板上(见 pb_render.c)
-PANEL_SCORE = (5, 131)
-PANEL_MULT = (136, 176)
-PANEL_BALL = (180, 235)
+PANEL_SCORE = (5, 110)
+PANEL_MULT = (114, 150)
+PANEL_BALL = (154, 235)
 
 
 def paint_backdrop():
@@ -449,7 +449,7 @@ def paint_decor(g, bed):
     pt.poly([(rx - 2.8, ry + 8), (rx, ry + 17), (rx + 2.8, ry + 8)], (255, 176, 60))
     pt.poly([(rx - 1.4, ry + 8), (rx, ry + 14), (rx + 1.4, ry + 8)], (255, 246, 200))
 
-    pt.text_arc(cx, cy + 2, r - 7.5, "SPACE CADET", 216, 324, (198, 226, 255), 1.05)
+    pt.text_arc(cx, cy + 2, r - 8.5, "SPACE CADET", 218, 322, (198, 226, 255), 0.85)
     pt.text_c(cx, cy + r - 8, "MISSION READY", COL_GOLD, 1.0)
 
     _plastic_panel(pt, 16, 198, 58, 230, "FUEL", "100%")
