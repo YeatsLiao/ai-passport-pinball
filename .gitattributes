@@ -1,0 +1,5 @@
+# Keep shell scripts LF so tools/host_test.sh works under Git Bash / WSL.
+*.sh text eol=lf
+*.py text eol=lf
+# Binary asset blob must never be line-normalized.
+*.bin -text
