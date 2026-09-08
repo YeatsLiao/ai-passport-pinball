@@ -248,9 +248,7 @@ void pb_game_step(pb_game *g, float dt) {
     switch (g->state) {
     case PB_STATE_LAUNCH:
     case PB_STATE_PLAY: {
-        // 挡板物理始终推进(LAUNCH 时球在道内,挡板对它无影响)
-        pb_flipper_step(&g->table.flippers[0], dt);
-        pb_flipper_step(&g->table.flippers[1], dt);
+        // 挡板在 pb_step 内随细分同步推进(LAUNCH 时球在道内,挡板对它无影响)
         pb_hit hit = {-1, -1, false};
         g->ball_prev_x = g->table.world.ball.pos.x;
         pb_step(&g->table.world, dt, &hit);
@@ -264,6 +262,23 @@ void pb_game_step(pb_game *g, float dt) {
             for (int i = 0; i < PB_LANE_COUNT; i++) {
                 float lx = g->table.lane_x[i];
                 if ((g->ball_prev_x - lx) * (b->pos.x - lx) < 0.0f) on_lane(g, i);
+            }
+        }
+
+        // 防卡死:低速滞留(顶弧夹角/柱缝)1.2s 后斜向给一记救球冲量。
+        // 只在挡板区以上生效——球停在放下挡板上等击球是正常状态。
+        if (b->active) {
+            float sp2 = b->vel.x * b->vel.x + b->vel.y * b->vel.y;
+            if (sp2 < 900.0f && b->pos.y < 230.0f) {
+                g->stuck_time += dt;
+                if (g->stuck_time > 1.2f) {
+                    g->stuck_time = 0;
+                    g->stuck_side = !g->stuck_side;
+                    b->vel.x = g->stuck_side ? -110.0f : 110.0f;
+                    b->vel.y = -380.0f;
+                }
+            } else {
+                g->stuck_time = 0;
             }
         }
 

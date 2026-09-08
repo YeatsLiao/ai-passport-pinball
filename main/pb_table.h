@@ -12,7 +12,7 @@
 #define PB_STATUS_H 26          // 顶部状态栏高度(分数/球数/倍率)
 
 #define PB_SEG_MAX 40
-#define PB_CIRCLE_MAX 4
+#define PB_CIRCLE_MAX 8         // 3 个 pop bumper + 中场/弹弓顶小立柱
 
 // 线段的玩法类别(决定颜色与计分)。
 typedef enum {

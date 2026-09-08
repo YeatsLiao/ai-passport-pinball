@@ -22,15 +22,18 @@ static const seg_def_t SEGS[] = {
     {  10,  96,  10, 264, PB_SEG_WALL, 0.35f, 0, false },  // 左外墙
     {  10,  96,  14,  56, PB_SEG_WALL, 0.35f, 0, false },  // 左上弧
     {  14,  56,  34,  32, PB_SEG_WALL, 0.35f, 0, false },
-    {  34,  32,  70,  25, PB_SEG_WALL, 0.35f, 0, false },
-    {  70,  25, 150,  25, PB_SEG_WALL, 0.35f, 0, false },  // 顶部平段
-    { 150,  25, 190,  28, PB_SEG_WALL, 0.35f, 0, false },
-    { 190,  28, 210,  24, PB_SEG_WALL, 0.35f, 0, false },  // 跨发球道口
-    { 210,  24, 228,  40, PB_SEG_WALL, 0.35f, 0, false },  // 外墙顶
+    {  34,  32,  70,  26, PB_SEG_WALL, 0.35f, 0, false },
+    {  70,  26, 150,  30, PB_SEG_WALL, 0.35f, 0, false },  // 顶部缓拱:慢球总能滚离近水平段
+    { 150,  30, 210,  26, PB_SEG_WALL, 0.35f, 0, false },  // 跨发球道口
+    { 210,  26, 228,  40, PB_SEG_WALL, 0.35f, 0, false },  // 外墙顶
     { 228,  40, 230,  70, PB_SEG_WALL, 0.35f, 0, false },
     { 230,  70, 230, 306, PB_SEG_WALL, 0.30f, 0, false },  // 右外墙(发球道外侧)
     { 204,  44, 204, 264, PB_SEG_WALL, 0.35f, 0, false },  // 发球道内墙
     {  24, 120,  24, 186, PB_SEG_WALL, 0.35f, 0, false },  // 目标组背墙
+    {  30,  58,  27,  86, PB_SEG_WALL, 0.35f, 0, false },  // 左上轨道导轨(与背墙顺接)
+    {  27,  86,  25, 122, PB_SEG_WALL, 0.35f, 0, false },
+    { 184,  58, 188,  86, PB_SEG_WALL, 0.35f, 0, false },  // 右上轨道导轨
+    { 188,  86, 188, 122, PB_SEG_WALL, 0.35f, 0, false },
     // ---- 底部导轨:外墙滑下来的球导入挡板(原版 inlane 的简化) ----
     {  10, 264,  72, 277, PB_SEG_WALL, 0.30f, 0, false },  // 左下导轨 → 左挡板轴
     { 204, 264, 142, 277, PB_SEG_WALL, 0.30f, 0, false },  // 右下导轨 → 右挡板轴
@@ -60,12 +63,18 @@ static const pb_circle CIRCLES[] = {
     { {107,  84}, 15, 0.60f, 180, true },
     { { 70, 110}, 12, 0.60f, 170, true },
     { {144, 110}, 12, 0.60f, 170, true },
+    { { 58, 180}, 4.5, 0.65f,   0, true },   // 小立柱:给中场加弹点(无 kick)
+    { {156, 180}, 4.5, 0.65f,   0, true },
+    { {107, 150}, 4.5, 0.65f,   0, true },   // 中场立柱:bumper 三角下方的回弹点
+    { { 78, 208}, 4.0, 0.65f,   0, true },   // 弹弓顶小柱:进挡板区前多一双向弹
+    { {136, 208}, 4.0, 0.65f,   0, true },
 };
 
 // 挡板:rest/raised 为弧度。左挡板 rest≈+32°(指向右下),raised≈-26°。
 static void init_flipper(pb_flipper *f, float px, float py, float rest, float raised) {
     f->pivot = (pb_vec2){px, py};
     f->len = 34.0f;
+    f->radius = 2.4f;                  // 杆半宽,与精灵宽度对齐(精灵半宽 ~2.3-2.8)
     f->rest = rest;
     f->raised = raised;
     f->speed = 20.0f;

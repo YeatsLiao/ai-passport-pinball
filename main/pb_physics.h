@@ -34,10 +34,11 @@ typedef struct {
     bool solid;
 } pb_circle;
 
-// 挡板(flipper):绕 pivot 旋转的杆。
+// 挡板(flipper):绕 pivot 旋转的杆(碰撞体为带半宽的胶囊)。
 typedef struct {
     pb_vec2 pivot;
     float len;
+    float radius;       // 杆的半宽(胶囊半径),视觉与手感对齐用
     float angle;        // 当前角度(弧度,y 向下坐标系)
     float omega;        // 当前角速度(弧度/秒,用于给球传递动量)
     float rest;         // 静止角
@@ -72,7 +73,8 @@ void pb_flipper_set(pb_flipper *f, bool up);
 // 推进挡板角度并更新 omega。dt 单位秒。
 void pb_flipper_step(pb_flipper *f, float dt);
 
-// 推进世界一个帧步长(dt 秒)。内部自适应细分,保证单步位移 <= r/2 不穿模。
+// 推进世界一个帧步长(dt 秒)。内部自适应细分,保证单步位移(球的移动和
+// 挡板扫动)不超过半径一半;挡板也随细分同步推进,调用方无需再单独步进。
 // 命中信息累加进 *hit(传 NULL 忽略)。同一帧多次命中同一元素只报一次由调用者去重,
 // 本函数对每次细分步内的不同元素都上报。
 void pb_step(pb_world *w, float dt, pb_hit *hit);

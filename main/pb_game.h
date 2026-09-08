@@ -62,6 +62,8 @@ typedef struct {
     float flash_circle[PB_CIRCLE_MAX];
     float flash_target[PB_TARGET_COUNT];
     float flash_sling;
+    float stuck_time;               // 低速滞留计时(防卡死救球用)
+    bool stuck_side;                // 救球冲量左右交替
 
     // 输入事件环形队列(按键回调单生产者,游戏步进单消费者)。
     volatile uint8_t ev_head, ev_tail;

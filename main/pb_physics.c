@@ -5,7 +5,7 @@
 
 #include <math.h>
 
-#define PB_MAX_SUBSTEPS 10
+#define PB_MAX_SUBSTEPS 24
 
 // ---- 小工具 ----
 
@@ -99,16 +99,17 @@ static bool collide_circle(pb_ball *ball, const pb_circle *c) {
     return true;
 }
 
-// 挡板:与旋转杆的碰撞 + 动量传递(接触点表面速度参与相对速度)。
+// 挡板:与带半宽的旋转杆(胶囊)碰撞 + 动量传递(接触点表面速度参与相对速度)。
 static bool collide_flipper(pb_ball *ball, const pb_flipper *f) {
     pb_vec2 tip = v_add(f->pivot, (pb_vec2){cosf(f->angle) * f->len, sinf(f->angle) * f->len});
     pb_vec2 q = closest_on_seg(f->pivot, tip, ball->pos);
     pb_vec2 d = v_sub(ball->pos, q);
     float dist = v_len(d);
-    if (dist >= ball->r) return false;
+    float sum = ball->r + f->radius;
+    if (dist >= sum) return false;
     if (dist < 1e-4f) d = (pb_vec2){0.0f, -1.0f};
     pb_vec2 n = v_scale(d, 1.0f / (dist > 1e-4f ? dist : 1.0f));
-    ball->pos = v_add(q, v_scale(n, ball->r + 0.01f));
+    ball->pos = v_add(q, v_scale(n, sum + 0.01f));
 
     pb_vec2 vf = flipper_point_vel(f, q);
     pb_vec2 vrel = v_sub(ball->vel, vf);
@@ -133,14 +134,27 @@ void pb_step(pb_world *w, float dt, pb_hit *hit) {
         sp = w->max_speed;
     }
 
-    // 自适应细分:单步位移不超过半径一半
+    // 自适应细分:单步位移(球的移动或挡板扫动)不超过半径一半,
+    // 否则快速摆动的挡板会一帧从球身上扫过去(手感上的"打不到球")。
+    float move = sp;
+    for (int k = 0; k < w->flipper_count; k++) {
+        const pb_flipper *f = &w->flippers[k];
+        if (fabsf((f->up ? f->raised : f->rest) - f->angle) > 1e-4f) {
+            float tip_sp = f->speed * f->len;
+            if (tip_sp > move) move = tip_sp;
+        }
+    }
     int n = 1;
-    if (b->r > 0.0f) n = (int)(sp * dt / (b->r * 0.5f)) + 1;
+    if (b->r > 0.0f) n = (int)(move * dt / (b->r * 0.5f)) + 1;
     if (n < 1) n = 1;
     if (n > PB_MAX_SUBSTEPS) n = PB_MAX_SUBSTEPS;
     float h = dt / (float)n;
 
     for (int i = 0; i < n; i++) {
+        // 挡板随细分同步推进:角度变化被切成小步,每次角度变化后都做碰撞检测
+        for (int k = 0; k < w->flipper_count; k++)
+            pb_flipper_step(&w->flippers[k], h);
+
         b->vel.y += w->gravity * h;
         float keep = expf(-w->drag * h);
         b->vel = v_scale(b->vel, keep);

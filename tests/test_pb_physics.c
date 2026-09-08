@@ -118,8 +118,7 @@ static void test_flipper_kick(void) {
     pb_flipper_set(f, true);
     float vy_min = 0.0f;
     for (int i = 0; i < 30; i++) {              // 抬起过程 ~50ms
-        pb_flipper_step(f, 0.016f);
-        pb_step(&t.world, 0.016f, NULL);
+        pb_step(&t.world, 0.016f, NULL);        // 挡板在 pb_step 内随细分推进
         if (t.world.ball.vel.y < vy_min) vy_min = t.world.ball.vel.y;
     }
     CHECK(vy_min < -150.0f, "flipper launches ball up");
