@@ -18,12 +18,13 @@
 #define C_MSG     0x7fd4ff
 #define C_PLUNGER 0xffd24a
 
-// 记分板三块 LCD 面板(与 pb_art.py 的 PANEL_* 常量一致)
+// 记分板三块 LCD 面板(与 pb_art.py 的 PANEL_* 常量一致)。
+// BALL 面板加宽:14 号字的 "BALL 3/3" 约 62px,窄面板会溢出到相邻面板上。
 #define PANEL_SCORE_X0 5
-#define PANEL_SCORE_X1 131
-#define PANEL_MULT_X0  136
-#define PANEL_MULT_X1  176
-#define PANEL_BALL_X0  180
+#define PANEL_SCORE_X1 110
+#define PANEL_MULT_X0  114
+#define PANEL_MULT_X1  150
+#define PANEL_BALL_X0  154
 #define PANEL_BALL_X1  235
 #define PANEL_Y0       4
 #define PANEL_H        18
@@ -92,19 +93,38 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_remove_style_all(R.overlay);
     lv_obj_set_size(R.overlay, PB_SCREEN_W, PB_SCREEN_H);
     lv_obj_set_pos(R.overlay, 0, 0);
-    lv_obj_set_style_bg_color(R.overlay, lv_color_hex(0x060810), 0);
-    lv_obj_set_style_bg_opa(R.overlay, LV_OPA_80, 0);
+    lv_obj_set_style_bg_color(R.overlay, lv_color_hex(0x04060c), 0);
+    lv_obj_set_style_bg_opa(R.overlay, LV_OPA_90, 0);
 
-    R.lbl_ov_title = lv_label_create(R.overlay);
+    // 中央不透明卡片:完全压住背后的台面花纹,文字才有对比度。
+    // 高度按"标题 20 号 + 副标题 3 行 14 号"预算,不靠自动折行堆高度。
+    lv_obj_t *card = lv_obj_create(R.overlay);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, 216, 148);
+    lv_obj_align(card, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x0b111e), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(0x3d5170), 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_radius(card, 8, 0);
+
+    R.lbl_ov_title = lv_label_create(card);
+    lv_obj_set_width(R.lbl_ov_title, 200);                  // 限宽换行,不溢出卡片
+    lv_label_set_long_mode(R.lbl_ov_title, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(R.lbl_ov_title, lv_color_hex(C_SCORE), 0);
     lv_obj_set_style_text_font(R.lbl_ov_title, &lv_font_montserrat_20, 0);
-    lv_obj_center(R.lbl_ov_title);
-
-    R.lbl_ov_sub = lv_label_create(R.overlay);
-    lv_obj_set_style_text_color(R.lbl_ov_sub, lv_color_hex(C_TEXT), 0);
+    lv_obj_set_style_text_align(R.lbl_ov_title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(R.lbl_ov_title, LV_ALIGN_TOP_MID, 0, 12);
+    
+    R.lbl_ov_sub = lv_label_create(card);
+    lv_obj_set_width(R.lbl_ov_sub, 204);
+    lv_label_set_long_mode(R.lbl_ov_sub, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(R.lbl_ov_sub, lv_color_hex(0xdde8f5), 0);
     lv_obj_set_style_text_font(R.lbl_ov_sub, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(R.lbl_ov_sub, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_CENTER, 0, 34);
+    lv_obj_set_style_text_line_space(R.lbl_ov_sub, 4, 0);
+    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_BOTTOM_MID, 0, -14);
 }
 
 void pb_render_build(pb_game *g, lv_obj_t *parent) {
@@ -159,6 +179,9 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
 
     // 台面提示(叠在中央徽章上,对标原版把任务状态放在台面中心)
     R.lbl_msg = lv_label_create(parent);
+    lv_obj_set_width(R.lbl_msg, 150);                       // 限宽换行:长提示不再横穿台面
+    lv_label_set_long_mode(R.lbl_msg, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(R.lbl_msg, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(R.lbl_msg, lv_color_hex(C_MSG), 0);
     lv_obj_set_style_text_font(R.lbl_msg, &lv_font_montserrat_14, 0);
     lv_obj_align(R.lbl_msg, LV_ALIGN_CENTER, 0, 26);
@@ -302,7 +325,9 @@ void pb_render_sync(pb_game *g) {
             if (g->state == PB_STATE_TITLE) {
                 lv_label_set_text(R.lbl_ov_title, "SPACE PINBALL");
                 lv_label_set_text_fmt(R.lbl_ov_sub,
-                    "HIGH %lu\nL=LEFT  R=RIGHT\nHOLD OK TO LAUNCH",
+                    "HIGH %lu\n"
+                    "UP/DOWN: FLIPPER\n"
+                    "OK: LAUNCH   HOLD: EXIT",
                     (unsigned long)g->high_score);
             } else {
                 lv_label_set_text(R.lbl_ov_title, "GAME OVER");
