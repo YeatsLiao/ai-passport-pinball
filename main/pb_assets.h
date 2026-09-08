@@ -21,6 +21,14 @@ extern const lv_image_dsc_t pb_img_bg;
 extern const lv_image_dsc_t pb_img_ball;
 extern const int16_t pb_ball_ofs[2];
 
+// 中央虫洞光环:[0]=常态 [1]=吸入闪光。pb_hole_pos 为屏幕绝对坐标。
+extern const lv_image_dsc_t *const pb_img_hole[2];
+extern const int16_t pb_hole_pos[2];
+
+// 球阴影(半透明黑椭圆)。pb_shadow_ofs 是左上角相对球心的偏移。
+extern const lv_image_dsc_t pb_img_shadow;
+extern const int16_t pb_shadow_ofs[2];
+
 // 挡板:[side][frame],frame 0 = 静止,末帧 = 抬起。
 // pb_flip_ofs 是各帧包围盒左上角相对转轴的偏移。
 extern const lv_image_dsc_t *const pb_img_flip[2][PB_ART_FLIP_FRAMES];

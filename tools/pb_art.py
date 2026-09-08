@@ -639,6 +639,7 @@ def render_background(g):
 
     paint_lane_channel(g, img)
     paint_static_hardware(g, img)
+    paint_black_hole(g, img)
     paint_apron_and_drain(img)
     paint_glow_and_vignette(img)
 
@@ -837,6 +838,41 @@ def draw_sling(pt, a, b, flash):
         pt.circle(p[0] - 0.4, p[1] - 0.5, 0.7, fill=COL_RAIL_HI)
 
 
+def paint_black_hole(g, img):
+    """中央虫洞:径向渐变深洞 + 光环(坐标与捕获半径见 pb_table.h 的 PB_HOLE_*)。"""
+    pt = Painter(img)
+    hx, hy = g["hole"]
+    for r, col in ((13.5, (10, 16, 30)), (11.5, (5, 8, 16)), (9.0, (1, 2, 5))):
+        pt.circle(hx, hy, r, fill=col)
+    pt.arc(hx - 13.5, hy - 13.5, hx + 13.5, hy + 13.5, 200, 340, (96, 156, 235), 1.5)
+    pt.arc(hx - 13.5, hy - 13.5, hx + 13.5, hy + 13.5, 20, 160, (52, 92, 165), 1.2)
+    pt.circle(hx, hy, 8.6, outline=(24, 30, 44), w=0.8)
+
+
+def draw_hole_halo(pt, strong):
+    """虫洞光环精灵:常态低调呼吸,吸入/闪光时亮起(洞芯颜色与背景一致)。"""
+    pt.circle(0, 0, 8.8, fill=(1, 2, 5))
+    if strong:
+        pt.arc(-14, -14, 14, 14, 190, 350, (150, 205, 255), 2.2)
+        pt.arc(-14, -14, 14, 14, 10, 170, (90, 140, 220), 1.6)
+        pt.circle(0, 0, 4.6, fill=(120, 185, 250))
+        pt.circle(0, 0, 2.4, fill=(235, 248, 255))
+    else:
+        pt.arc(-14, -14, 14, 14, 200, 340, (80, 130, 205), 1.6)
+        pt.arc(-14, -14, 14, 14, 20, 160, (45, 80, 140), 1.1)
+
+
+def make_shadow():
+    """球影:黑色椭圆 alpha 渐变,渲染层贴在球下偏移处制造立体感。"""
+    w, h = 14, 10
+    a = Image.new("L", (w * SS, h * SS), 0)
+    ImageDraw.Draw(a).ellipse([2 * SS, 1.6 * SS, (w - 2) * SS, (h - 1.6) * SS],
+                              fill=210)
+    return dict(w=w, h=h, ox=-w // 2, oy=-h // 2,
+                rgb=Image.new("RGB", (w, h), (0, 0, 0)),
+                a=a.resize((w, h), Image.LANCZOS))
+
+
 def render_sprites(g):
     """生成全部精灵,返回 (sprites, meta)。"""
     sp = {}
@@ -906,6 +942,13 @@ def render_sprites(g):
         ])
     sp["sling"] = sling
 
+    # 虫洞光环(中心即洞心,渲染层用 pb_hole_pos 直接放)与球影。
+    sp["hole"] = [
+        make_sprite(lambda pt: draw_hole_halo(pt, False), -15, -15, 15, 15),
+        make_sprite(lambda pt: draw_hole_halo(pt, True), -15, -15, 15, 15),
+    ]
+    sp["shadow"] = [make_shadow()]
+
     # 共享精灵的逐实例位置:同形状、同角度,直接按几何中心平移。
     meta = dict(
         flip_frames=FLIP_FRAMES,
@@ -916,5 +959,7 @@ def render_sprites(g):
                   sp["tgt"][0]["oy"] +
                   ((s["a"][1] + s["b"][1]) / 2.0 - ty0))
                  for s in g["targets"]],
+        hole_pos=(sp["hole"][0]["ox"] + g["hole"][0],
+                  sp["hole"][0]["oy"] + g["hole"][1]),
     )
     return sp, meta

@@ -14,6 +14,7 @@
 #   python tools/gen_assets.py --preview
 import argparse
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -62,6 +63,9 @@ def build_blob(g, bg_img, sp):
                  A.sprite_to_rgb565a8(s))
 
     add_sp("pb_img_ball", sp["ball"][0])
+    for j, s in enumerate(sp["hole"]):
+        add_sp("pb_img_hole_%d" % j, s)
+    add_sp("pb_img_shadow", sp["shadow"][0])
     for side, frames in enumerate(sp["flip"]):
         for i, s in enumerate(frames):
             add_sp("pb_img_flip_%d_%d" % (side, i), s)
@@ -113,6 +117,17 @@ def emit_c(blob, g, sp, meta):
     L.append(dsc("pb_img_ball", by_name["pb_img_ball"]))
     L.append("const int16_t pb_ball_ofs[2] = { %d, %d };\n\n"
              % (sp["ball"][0]["ox"], sp["ball"][0]["oy"]))
+
+    # 虫洞光环与球影
+    for j in range(2):
+        L.append(dsc("pb_img_hole_%d" % j, by_name["pb_img_hole_%d" % j]))
+    L.append("const lv_image_dsc_t *const pb_img_hole[2] = "
+             "{ &pb_img_hole_0, &pb_img_hole_1 };\n")
+    L.append("const int16_t pb_hole_pos[2] = { %d, %d };\n\n"
+             % (int(round(meta["hole_pos"][0])), int(round(meta["hole_pos"][1]))))
+    L.append(dsc("pb_img_shadow", by_name["pb_img_shadow"]))
+    L.append("const int16_t pb_shadow_ofs[2] = { %d, %d };\n\n"
+             % (sp["shadow"][0]["ox"], sp["shadow"][0]["oy"]))
 
     # 挡板:每帧包围盒不同,必须把"包围盒左上角相对转轴"的偏移一起导出,
     # 渲染层才能把精灵贴回正确的枢轴位置。
@@ -201,6 +216,14 @@ extern const lv_image_dsc_t pb_img_bg;
 extern const lv_image_dsc_t pb_img_ball;
 extern const int16_t pb_ball_ofs[2];
 
+// 中央虫洞光环:[0]=常态 [1]=吸入闪光。pb_hole_pos 为屏幕绝对坐标。
+extern const lv_image_dsc_t *const pb_img_hole[2];
+extern const int16_t pb_hole_pos[2];
+
+// 球阴影(半透明黑椭圆)。pb_shadow_ofs 是左上角相对球心的偏移。
+extern const lv_image_dsc_t pb_img_shadow;
+extern const int16_t pb_shadow_ofs[2];
+
 // 挡板:[side][frame],frame 0 = 静止,末帧 = 抬起。
 // pb_flip_ofs 是各帧包围盒左上角相对转轴的偏移。
 extern const lv_image_dsc_t *const pb_img_flip[2][PB_ART_FLIP_FRAMES];
@@ -237,6 +260,9 @@ def compose_preview(bg_img, sp, g, meta):
         rgba = Image.merge("RGBA", (*s["rgb"].convert("RGB").split(), s["a"]))
         img.alpha_composite(rgba, (int(round(x)), int(round(y))))
 
+    paste(sp["hole"][0], *meta["hole_pos"])
+    sh = sp["shadow"][0]
+    paste(sh, int(96 + 2 + sh["ox"]), int(160 + 3 + sh["oy"]))
     paste(sp["ball"][0], int(96 + sp["ball"][0]["ox"]), int(160 + sp["ball"][0]["oy"]))
     for side, f in enumerate(sorted(g["flippers"], key=lambda d: d["idx"])):
         s = sp["flip"][side][0]
@@ -264,6 +290,7 @@ def save_previews(bg_img, sp, g, meta):
 
     # 精灵表:一眼看清每个可换帧部件长什么样
     cells = [("ball", [sp["ball"][0]])]
+    cells += [("hole", sp["hole"]), ("shadow", sp["shadow"])]
     cells += [("flip_l", sp["flip"][0]), ("flip_r", sp["flip"][1])]
     cells += [("bump%d" % i, p) for i, p in enumerate(sp["bump"])]
     cells += [("lane", sp["lane"]), ("target", sp["tgt"])]
@@ -288,6 +315,12 @@ def main():
     args = ap.parse_args()
 
     g = A.parse_geometry(os.path.join(ROOT, "main", "pb_table.c"))
+    # 虫洞坐标的单一真相源在 pb_table.h,美术从这里同步。
+    hsrc = open(os.path.join(ROOT, "main", "pb_table.h"), encoding="utf-8").read()
+    g["hole"] = (
+        float(re.search(r"#define PB_HOLE_X\s+([\d.]+)", hsrc).group(1)),
+        float(re.search(r"#define PB_HOLE_Y\s+([\d.]+)", hsrc).group(1)),
+    )
     print("解析几何: %d 线段, %d bumper, %d 挡板, %d 车道"
           % (len(g["segs"]), len(g["circles"]), len(g["flippers"]), len(g["lanes"])))
 
