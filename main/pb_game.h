@@ -73,6 +73,7 @@ typedef struct {
     float flash_sling;
     float stuck_time;               // 低速滞留计时(防卡死救球用)
     bool stuck_side;                // 救球冲量左右交替
+    float lost_time;                // 球不活跃又不在虫洞过场的计时(丢球保险)
 
     // 中央虫洞:捕获计时/冷却/吸入闪光,弹出车道与冷却期防回吸。
     float hole_timer;

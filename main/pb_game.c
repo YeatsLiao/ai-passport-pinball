@@ -109,6 +109,8 @@ static void new_game(pb_game *g) {
     g->hole_timer = 0;
     g->hole_cooldown = 0;
     g->flash_hole = 0;
+    g->stuck_time = 0;
+    g->lost_time = 0;
     for (int i = 0; i < PB_POPUPS; i++) g->popups[i].t = 0;
     reset_playfield(g);
     spawn_ball_in_lane(g);
@@ -203,6 +205,18 @@ static void on_drain(pb_game *g) {
     g->state_timer = 0;
 }
 
+// 局末/中途退场时统一结算最高分。之前只有打满 3 球进 OVER 才存,
+// 暂停菜单 EXIT/RESTART 中途退出时分数直接丢弃——这就是"高分不记录"的根因。
+static void finalize_score(pb_game *g) {
+    if (g->score > g->high_score) {
+        g->high_score = g->score;
+        g->new_high = true;
+        pb_game_nvs_save(g);
+    } else {
+        g->new_high = false;
+    }
+}
+
 // ---- 主步进 ----
 
 void pb_game_step(pb_game *g, float dt) {
@@ -249,8 +263,14 @@ void pb_game_step(pb_game *g, float dt) {
             else if (key == PB_KEY_R) g->pause_sel = (uint8_t)((g->pause_sel + 1) % 3);
             else if (key == PB_KEY_OK) {
                 if (g->pause_sel == 0)       g->state = g->paused_prev;   // RESUME
-                else if (g->pause_sel == 1)  new_game(g);                // RESTART
-                else { g->state = PB_STATE_TITLE; g->state_timer = 0; }  // EXIT
+                else if (g->pause_sel == 1) {                            // RESTART
+                    finalize_score(g);
+                    new_game(g);
+                } else {                                                 // EXIT
+                    finalize_score(g);
+                    g->state = PB_STATE_TITLE;
+                    g->state_timer = 0;
+                }
             }
             continue;
         }
@@ -360,6 +380,17 @@ void pb_game_step(pb_game *g, float dt) {
                 b->active = true;
                 g->hole_cooldown = 4.0f;
             }
+        } else if (!b->active) {
+            // 丢球保险:球不活跃又不在虫洞过场(任何漏网路径),2.2s 后按掉球处理,
+            // 杜绝"球消失且球数不变"的假死局面。
+            g->lost_time += dt;
+            if (g->lost_time > 2.2f) {
+                g->lost_time = 0;
+                on_drain(g);
+                break;
+            }
+        } else {
+            g->lost_time = 0;
         }
 
         if (hit.circle >= 0) {
@@ -386,13 +417,7 @@ void pb_game_step(pb_game *g, float dt) {
     case PB_STATE_DRAIN:
         if (g->state_timer >= 1.2f) {
             if (g->ball_num >= PB_BALLS_TOTAL) {
-                if (g->score > g->high_score) {
-                    g->high_score = g->score;
-                    g->new_high = true;
-                    pb_game_nvs_save(g);
-                } else {
-                    g->new_high = false;
-                }
+                finalize_score(g);
                 g->state = PB_STATE_OVER;
                 pb_audio_play(PB_SND_OVER);
             } else {
