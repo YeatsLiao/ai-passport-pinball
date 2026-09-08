@@ -62,7 +62,8 @@ typedef struct {
     bool lane_lit[PB_LANE_COUNT];
     bool target_down[PB_TARGET_COUNT];
     float target_reset;             // >0:目标组清空后重置倒计时
-    float ball_save;                // >0:球保存剩余秒数
+    float ball_save;                // >0:球保存剩余秒数(每球最多触发一次)
+    bool ball_save_used;            // 本球的球保存已用过(防 8s 窗口内循环重发=无限球)
     float launch_power;             // 0..1 蓄力
 
     char msg[24];                   // 台面提示文本

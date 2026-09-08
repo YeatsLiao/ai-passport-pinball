@@ -104,6 +104,7 @@ static void new_game(pb_game *g) {
     g->score = 0;
     g->ball_num = 1;
     g->ball_save = 0;
+    g->ball_save_used = false;
     g->bump_combo = 0;
     g->new_high = false;
     g->hole_timer = 0;
@@ -192,7 +193,13 @@ static void on_target(pb_game *g, int idx) {
 static void on_drain(pb_game *g) {
     g->table.world.ball.active = false;
     g->bump_combo = 0;                  // 连击随球结束
+    // 清虫洞残留:hole_timer 挂着会在到期时把下一颗球瞬移到车道口
+    g->hole_timer = 0;
+    g->flash_hole = 0;
+    g->lost_time = 0;
     if (g->ball_save > 0) {
+        g->ball_save = 0;               // 每球只保一次:耗尽,防 8s 窗口内循环重发
+        g->ball_save_used = true;
         spawn_ball_in_lane(g);
         g->state = PB_STATE_LAUNCH;
         g->state_timer = 0;
@@ -292,7 +299,8 @@ void pb_game_step(pb_game *g, float dt) {
                 float v = 800.0f + 450.0f * g->launch_power;
                 g->table.world.ball.vel.x = 0;
                 g->table.world.ball.vel.y = -v;
-                g->ball_save = PB_BALL_SAVE_S;
+                if (!g->ball_save_used)         // 球保存只在每球首次发射时生效
+                    g->ball_save = PB_BALL_SAVE_S;
                 g->state = PB_STATE_PLAY;
                 g->state_timer = 0;
                 show_msg(g, "", 0);
@@ -423,6 +431,7 @@ void pb_game_step(pb_game *g, float dt) {
             } else {
                 g->ball_num++;
                 g->mult = 1;                    // 倍率与车道逐球重置(同原版 bonus)
+                g->ball_save_used = false;      // 新球重新获得一次球保存资格
                 for (int i = 0; i < PB_LANE_COUNT; i++) g->lane_lit[i] = false;
                 spawn_ball_in_lane(g);
                 g->state = PB_STATE_LAUNCH;
