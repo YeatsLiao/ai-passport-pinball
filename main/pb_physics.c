@@ -2,6 +2,7 @@
 // 参考 sanderdesnaijer/esp32-pinball 的思路:自适应子步长 + 圆/线段/圆碰撞,
 // 在此基础上补充挡板动量传递与单向阀,规则与台面在 pb_table/pb_game 中。
 #include "pb_physics.h"
+#include "pb_table.h"      // pb_seg_kind_t:命中上报优先级聚合用
 
 #include <math.h>
 
@@ -120,6 +121,15 @@ static bool collide_flipper(pb_ball *ball, const pb_flipper *f) {
     return true;
 }
 
+// 命中上报优先级:玩法线段(弹靶/弹弓)高于普通墙;同优先级保留最后一次命中。
+static int seg_prio(uint8_t kind) {
+    switch (kind) {
+    case PB_SEG_TARGET: return 3;
+    case PB_SEG_SLING:  return 2;
+    default:            return 1;
+    }
+}
+
 // ---- 主步进 ----
 
 void pb_step(pb_world *w, float dt, pb_hit *hit) {
@@ -161,7 +171,12 @@ void pb_step(pb_world *w, float dt, pb_hit *hit) {
         b->pos = v_add(b->pos, v_scale(b->vel, h));
 
         for (int k = 0; k < w->seg_count; k++) {
-            if (collide_seg(b, &w->segs[k]) && hit) hit->seg = k;
+            if (!collide_seg(b, &w->segs[k]) || !hit) continue;
+            // 同帧多命中时按玩法优先级聚合:弹靶/弹弓的得分事件不能被同帧
+            // 撞到的普通墙覆盖 —— 弹靶贴着背墙,覆盖式上报会让 on_target 几乎
+            // 收不到事件,倍率永远推不进(实机反馈"倍率从来没增加"的根因)。
+            if (hit->seg < 0 || seg_prio(w->segs[k].kind) >= seg_prio(w->segs[hit->seg].kind))
+                hit->seg = k;
         }
         for (int k = 0; k < w->circle_count; k++) {
             if (collide_circle(b, &w->circles[k]) && hit) hit->circle = k;

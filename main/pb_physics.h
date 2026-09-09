@@ -3,6 +3,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 // 2D 向量。单位:像素、像素/秒。屏幕坐标系 y 向下为正。
 typedef struct {
@@ -23,6 +24,7 @@ typedef struct {
     float kick;         // 命中后沿法向的额外冲量(弹簧炮/弹弓用),普通墙为 0
     bool gate;          // 单向阀:球快速上行时穿透(发球道口防回吞),其余视为实心
     bool solid;         // false = 暂时失效(掉落目标放倒后)
+    uint8_t kind;       // pb_seg_kind_t:命中上报按玩法优先级聚合用
 } pb_seg;
 
 // 圆形障碍(pop bumper 等)。

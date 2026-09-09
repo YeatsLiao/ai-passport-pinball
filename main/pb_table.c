@@ -100,6 +100,7 @@ void pb_table_init(pb_table *t) {
         t->segs[i].kick = d->kick;
         t->segs[i].gate = d->gate;
         t->segs[i].solid = true;
+        t->segs[i].kind = (uint8_t)d->kind;   // 物理层命中上报按 kind 聚合
         t->kind[i] = d->kind;
     }
 
