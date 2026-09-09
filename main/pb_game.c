@@ -499,8 +499,8 @@ void pb_game_step(pb_game *g, float dt) {
             }
         }
 
-        // 黑洞 a_kout3:两挡板间隙的落球口。§2.4 20000 分 + 向上踢回挡板区,
-        // 冷却期内不再捕获 → 球直接掉进 drain,球数正常推进。
+        // 黑洞 a_kout3:徽章行星中心的"行星虫洞"(实机反馈后从落球口移入)。
+        // §2.4 20000 分 + 向上踢回挡板区;冷却期内不捕获,球自然从旁穿过。
         if (g->hole_cooldown <= 0 && b->active) {
             float hx = b->pos.x - PB_HOLE_X, hy = b->pos.y - PB_HOLE_Y;
             if (hx * hx + hy * hy < PB_HOLE_R * PB_HOLE_R) {

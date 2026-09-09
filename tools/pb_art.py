@@ -453,10 +453,8 @@ def paint_decor(g, bed):
     _plastic_panel(pt, 16, 198, 58, 230, "ATTACK", None)   # 当前 bumper 档位分值
     _plastic_panel(pt, 156, 198, 198, 230, "RANK", None)    # 军衔由渲染层动态显示
 
-    pt.rect(62, 57, 152, 68, fill=(10, 16, 28))
-    pt.rect(62, 57, 152, 68, outline=COL_RAIL_MID, w=0.8)
-    pt.rect(63, 58, 151, 60.4, outline=mix(COL_RAIL_HI, (255, 255, 255), 0.2), w=0.5)
-    pt.text_c(107, 59.6, "SPACE PINBALL", (198, 226, 255), 1.0)
+    # UI 实机反馈:顶部 "SPACE PINBALL" 横幅(框+字)在小屏上模糊不请,
+    # 且与状态栏/菜单标题职责重复,整块删除。
 
     for sx, sgn in ((30, 1), (184, -1)):        # 底部导轨旁的 outlane 箭头
         for i in range(3):

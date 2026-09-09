@@ -176,7 +176,7 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_set_style_text_color(R.lbl_ov_hint, lv_color_hex(0x8a97ab), 0);
     lv_obj_set_style_text_font(R.lbl_ov_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(R.lbl_ov_hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(R.lbl_ov_hint, LV_ALIGN_TOP_MID, 0, 44);    // 44..64(标题下留分割线)
+    lv_obj_align(R.lbl_ov_hint, LV_ALIGN_TOP_MID, 0, 38);    // 两行 38..66(标题下留分割线)
 
     // UI 盘点 #3:标题与提示、提示与榜单之间各一道细分割线,视觉分组
     static const uint32_t DIV_COL = 0x2a4a7a;
@@ -184,19 +184,19 @@ static void build_overlay(lv_obj_t *parent) {
         lv_obj_t *div = lv_obj_create(card);
         lv_obj_remove_style_all(div);
         lv_obj_set_size(div, 190, 1);
-        lv_obj_align(div, LV_ALIGN_TOP_MID, 0, i == 0 ? 36 : 66);
+        lv_obj_align(div, LV_ALIGN_TOP_MID, 0, i == 0 ? 36 : 68);
         lv_obj_set_style_bg_color(div, lv_color_hex(DIV_COL), 0);
         lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
     }
 
     // 5 槽榜单(规格 §5.1):左对齐成表,数字用 %7ld 右靠齐(等宽数字)。
     R.lbl_ov_sub = lv_label_create(card);
-    lv_obj_set_size(R.lbl_ov_sub, 150, 84);
+    lv_obj_set_size(R.lbl_ov_sub, 150, 80);
     lv_obj_set_style_text_color(R.lbl_ov_sub, lv_color_hex(0xdde8f5), 0);
     lv_obj_set_style_text_font(R.lbl_ov_sub, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(R.lbl_ov_sub, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_style_pad_all(R.lbl_ov_sub, 0, 0);
-    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_TOP_MID, 0, 72);     // 72..152
+    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_TOP_MID, 0, 74);     // 74..154
 
     // 底部闪烁行:标题页 PRESS OK / 结算页新纪录提示
     R.lbl_blink = lv_label_create(card);
@@ -587,7 +587,7 @@ void pb_render_sync(pb_game *g) {
                 lv_obj_clear_flag(R.lbl_ov_hint, LV_OBJ_FLAG_HIDDEN);
                 if (g->state == PB_STATE_TITLE) {
                     lv_label_set_text(R.lbl_ov_title, "SPACE PINBALL");
-                    lv_label_set_text(R.lbl_ov_hint, "UP/DOWN:FLIP  OK:LAUNCH");
+                    lv_label_set_text(R.lbl_ov_hint, "UP/DOWN: FLIP\nOK: LAUNCH");
                     lv_obj_set_style_text_color(R.lbl_ov_hint,
                                                 lv_color_hex(0x8a97ab), 0);
                 } else {

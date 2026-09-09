@@ -51,10 +51,12 @@ static void test_spec_layout(void) {
     printf("[spec layout]\n");
     pb_table_init(&t);
 
-    // 黑洞 a_kout3 必须在两挡板尖端之下的落球口里(挡板尖 y≈298,弹弓底 262),
-    // 而不是在弹弓与挡板之间的必经落球线上。
-    CHECK(PB_HOLE_Y > 262.0f && PB_HOLE_Y < PB_SCREEN_H, "black hole in the drain mouth");
-    CHECK(PB_HOLE_X > 100.0f && PB_HOLE_X < 114.0f, "black hole between flipper tips");
+    // 黑洞 a_kout3:实机反馈后移到徽章行星中心,与环灯/立柱/侧灯保持安全距离
+    // (环灯 45、立柱 32、侧灯 23,均大于捕获盘 r8 + 球心 r4 的活动半径)。
+    CHECK(PB_HOLE_X > 100.0f && PB_HOLE_X < 114.0f, "black hole at badge center X");
+    CHECK(PB_HOLE_Y > 188.0f && PB_HOLE_Y < 200.0f, "black hole at badge center Y");
+    CHECK(PB_HOLE_Y > PB_INFO_Y1 + 8.0f && PB_HOLE_Y < 230.0f,
+          "black hole clear of info band and panels");
     // 引力井/hyperspace 分居左右窄通道,不与黑洞重合。
     CHECK(PB_WELL_X < 40.0f && PB_HS_X > 180.0f, "side holes on opposite flanks");
     CHECK(PB_INFO_Y1 - PB_INFO_Y0 >= 18.0f, "info band fits one 14px line");
