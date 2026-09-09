@@ -24,8 +24,8 @@
 #define SCORE_TGT_BANK  1500u     // §2.3 三个全倒
 #define SCORE_HOLE      20000u    // §2.4 a_kout3 黑洞 control_kickout_score2[0]
 #define SCORE_WELL      50000u    // §2.4 a_kout1 引力井 control_kickout_score3[0]
-#define SCORE_STAR      500u      // 右道星标单个(路过即亮)
-#define SCORE_STAR_ALL  2500u     // 一次下滑三枚全亮加成
+#define SCORE_STAR      500u      // 右道星柱单个(实体碰撞)
+#define SCORE_STAR_ALL  2500u     // 一局内三枚全亮加成
 #define PB_SCORE_MAX    99999999u // 记分板 8 位宽;原版是 1e9 进位(§4.6)
 
 // §2.1 control_bump_scores1[BmpIndex]
@@ -302,14 +302,15 @@ static void on_target(pb_game *g, int idx) {
     pb_audio_play(PB_SND_BONUS);
 }
 
-// 右道星标 lane_stars:回球滑道的路过判定点,无碰撞不挡球,路过即亮。
-// 一次下滑三枚全亮 → 加成后整组重置,可循环再点。
+// 右道星柱:实体回弹柱,击中即亮(物理反弹由 circles 碰撞体负责)。
+// 一局内三枚全亮 → 加成后整组重置,可循环再点。
 static void on_star(pb_game *g, int idx) {
+    if (g->star_lit[idx]) return;             // 已亮不重复计分
     g->star_lit[idx] = true;
     pb_ball *b = &g->table.world.ball;
     uint32_t got = add_score(g, SCORE_STAR);
     popup(g, got, b->pos.x - 6.0f, b->pos.y - 8.0f);
-    pb_audio_play(PB_SND_LANE);
+    pb_audio_play(PB_SND_BUMP);
 
     bool all = true;
     for (int i = 0; i < PB_STAR_COUNT; i++) all &= g->star_lit[i];
@@ -521,15 +522,6 @@ void pb_game_step(pb_game *g, float dt) {
             }
         }
 
-        // 右道星标:球沿右墙滑落时球心穿过判定半径即点亮(半径 9 = 标 r5 + 球 r4)。
-        if (b->active) {
-            for (int i = 0; i < PB_STAR_COUNT; i++) {
-                if (g->star_lit[i]) continue;
-                float dy = b->pos.y - (PB_STAR_Y0 + (float)i * PB_STAR_DY);
-                float dx = b->pos.x - PB_STAR_X;
-                if (dx * dx + dy * dy < 81.0f) on_star(g, i);
-            }
-        }
         // 黑洞 a_kout3:徽章行星中心的"行星虫洞"(实机反馈后从落球口移入)。
         // §2.4 20000 分 + 向上踢回挡板区;冷却期内不捕获,球自然从旁穿过。
         if (g->hole_cooldown <= 0 && b->active) {
@@ -602,15 +594,22 @@ void pb_game_step(pb_game *g, float dt) {
         }
 
         if (hit.circle >= 0) {
-            // §2.1 只有 kick>0 的三个是 pop bumper(走档位分);kick==0 的小立柱
-            // 走 §2.1 的 rebo 固定 500。之前全部按 bumper 计分 = 白拿最高 2000。
             int ci = hit.circle;
-            uint32_t base = (ci < g->table.circle_count && g->table.circles[ci].kick > 0.0f)
-                            ? pb_bump_score(g->bump_tier) : SCORE_REBO;
-            uint32_t got = add_score(g, base);
-            g->flash_circle[ci] = 0.25f;
-            popup(g, got, b->pos.x, b->pos.y - 10.0f);
-            pb_audio_play(PB_SND_BUMP);
+            int star_base = g->table.circle_count - PB_STAR_COUNT;
+            if (ci >= star_base) {
+                // 右道星柱:实体碰撞命中,亮灯计分(反弹已由物理层完成)。
+                g->flash_circle[ci] = 0.25f;
+                on_star(g, ci - star_base);
+            } else {
+                // §2.1 只有 kick>0 的三个是 pop bumper(走档位分);kick==0 的小立柱
+                // 走 §2.1 的 rebo 固定 500。之前全部按 bumper 计分 = 白拿最高 2000。
+                uint32_t base = (ci < g->table.circle_count && g->table.circles[ci].kick > 0.0f)
+                                ? pb_bump_score(g->bump_tier) : SCORE_REBO;
+                uint32_t got = add_score(g, base);
+                g->flash_circle[ci] = 0.25f;
+                popup(g, got, b->pos.x, b->pos.y - 10.0f);
+                pb_audio_play(PB_SND_BUMP);
+            }
         }
         if (hit.seg >= 0) {
             uint8_t kind = g->table.kind[hit.seg];

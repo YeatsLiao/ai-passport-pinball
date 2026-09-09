@@ -12,7 +12,7 @@
 #define PB_STATUS_H 26          // 顶部状态栏高度(分数/球数/倍率)
 
 #define PB_SEG_MAX 40
-#define PB_CIRCLE_MAX 8         // 3 个 pop bumper + 4 个小立柱(kick==0)
+#define PB_CIRCLE_MAX 10        // 3 pop bumper + 4 小立柱 + 3 右道星柱(kick==0)
 
 // 线段的玩法类别(决定颜色与计分)。
 typedef enum {
@@ -52,12 +52,13 @@ typedef struct {
 #define PB_HOLE_Y 200.0f
 #define PB_HOLE_R 8.0f      // 捕获半径(洞视觉半径 ~13,覆盖行星图案)
 
-// 右道星标 lane_stars:右外墙(204)内侧回球滑道的路过判定点,无碰撞不挡球。
-// 三枚收在信息带(底 144)与 ATTACK/RANK 卡片(顶 198)之间的空带内,互不重叠;
-// 球心贴墙滑落 x≈199.6,距星标 x=193 约 6.6px < 判定半径 9,必触发。
-#define PB_STAR_X   193.0f
+// 右道星柱 lane_stars:右外墙内侧滑道里的实体回弹柱(碰撞体,击中得分亮灯)。
+// 楔死推演:柱右缘距墙内缘 11.3 > 球径 8;柱间缝 17-2r=10 > 8;贴墙球心
+// (x≈199.6)距柱心 10.6 > r球+r柱=7.5 安全通过;球从台面撞柱弹回中央区。
+#define PB_STAR_X   189.0f
 #define PB_STAR_Y0  150.0f
 #define PB_STAR_DY  17.0f
+#define PB_STAR_R   3.5f
 #define PB_STAR_COUNT 3
 
 // 引力井 a_kout1:左上窄通道尽头的踢出洞。通道净宽 ~16px,球(r4)可通过。

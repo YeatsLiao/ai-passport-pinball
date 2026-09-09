@@ -38,7 +38,7 @@ static void test_table_sane(void) {
     for (int i = 0; i < t.circle_count; i++)
         if (t.circles[i].kick > 0.0f) bumps++; else posts++;
     CHECK(bumps == 3, "3 pop bumpers");
-    CHECK(posts == 4, "4 rebound posts");
+    CHECK(posts == 7, "7 rebound posts (4 table + 3 lane stars)");
     CHECK(t.circle_count <= PB_CIRCLE_MAX, "circle_count in range");
     for (int i = 0; i < PB_TARGET_COUNT; i++)
         CHECK(pb_table_target_seg(&t, i) >= 0, "target lookup");
@@ -57,11 +57,12 @@ static void test_spec_layout(void) {
     CHECK(PB_HOLE_Y > 196.0f && PB_HOLE_Y < 204.0f, "black hole at badge center Y");
     CHECK(PB_HOLE_Y > PB_INFO_Y1 + 8.0f && PB_HOLE_Y < 230.0f,
           "black hole clear of info band and panels");
-    // 右道星标:必须落在右外墙(204)内侧滑道内,且不压信息带/卡片/hs 洞。
-    CHECK(PB_STAR_X > 186.0f && PB_STAR_X < 200.0f, "lane stars inside right lane");
-    CHECK(PB_STAR_Y0 > 144.0f + 4.6f &&
-          PB_STAR_Y0 + (float)(PB_STAR_COUNT - 1) * PB_STAR_DY + 4.6f < 198.0f,
-          "lane stars clear of info band and panels");
+    // 右道星柱:实体碰撞体,必须与右墙/邻柱保持球径以上的缝,不楔死。
+    CHECK(PB_STAR_X + PB_STAR_R + 8.0f < 204.0f, "star-to-wall gap fits ball");
+    CHECK(PB_STAR_DY - 2.0f * PB_STAR_R >= 8.0f, "star-to-star gap fits ball");
+    CHECK(PB_STAR_X - PB_STAR_R > PB_INFO_X1, "star clear of info band");
+    CHECK(PB_STAR_Y0 + (float)(PB_STAR_COUNT - 1) * PB_STAR_DY + PB_STAR_R < 198.0f,
+          "star clear of panels");
     // 引力井/hyperspace 分居左右窄通道,不与黑洞重合。
     CHECK(PB_WELL_X < 40.0f && PB_HS_X > 180.0f, "side holes on opposite flanks");
     CHECK(PB_INFO_Y1 - PB_INFO_Y0 >= 18.0f, "info band fits one 14px line");

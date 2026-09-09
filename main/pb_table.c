@@ -70,6 +70,11 @@ static const pb_circle CIRCLES[] = {
     { {156, 180}, 4.5, 0.65f,   0, true },
     { { 78, 208}, 4.0, 0.65f,   0, true },   // 弹弓顶小柱:进挡板区前多一双向弹
     { {136, 208}, 4.0, 0.65f,   0, true },
+    // 右道星柱 lane_stars:击中亮灯 +500,三枚全亮 +2500(pb_game.c on_star)。
+    // 必须保持在数组尾部,渲染/计分用 circle_count - PB_STAR_COUNT 识别。
+    { {PB_STAR_X, PB_STAR_Y0},                PB_STAR_R, 0.65f, 0, true },
+    { {PB_STAR_X, PB_STAR_Y0 + PB_STAR_DY},   PB_STAR_R, 0.65f, 0, true },
+    { {PB_STAR_X, PB_STAR_Y0 + 2 * PB_STAR_DY}, PB_STAR_R, 0.65f, 0, true },
 };
 
 // 挡板:rest/raised 为弧度。左挡板 rest≈+32°(指向右下),raised≈-26°。

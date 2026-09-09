@@ -328,8 +328,6 @@ def main():
                  hconst("PB_RING_R"), int(hconst("PB_RING_COUNT")))
     g["upg"] = (hconst("PB_UPG_CX"), hconst("PB_UPG_CY"),
                 hconst("PB_UPG_DX"), int(hconst("PB_UPG_COUNT")))
-    g["star"] = (hconst("PB_STAR_X"), hconst("PB_STAR_Y0"),
-                 hconst("PB_STAR_DY"), int(hconst("PB_STAR_COUNT")))
     g["info"] = (hconst("PB_INFO_X0"), hconst("PB_INFO_Y0"),
                  hconst("PB_INFO_X1"), hconst("PB_INFO_Y1"))
     print("解析几何: %d 线段, %d bumper, %d 挡板, %d 车道"
