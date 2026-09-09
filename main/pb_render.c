@@ -14,7 +14,7 @@
 
 // ---- 文本配色(记分板 LCD 面板上的字) ----
 #define C_SCORE   0xffd24a
-#define C_TEXT    0x9aa7b8
+#define C_TEXT    0xbcd2ec   // 弱化色:UI 盘点 #1 倍率/球数用浅蓝白,和分数拉开权重
 #define C_MSG     0x7fd4ff
 #define C_PLUNGER 0xffd24a
 
@@ -42,6 +42,7 @@ typedef struct {
     lv_obj_t *ball;
     lv_obj_t *plunger;                      // 蓄力条
     lv_obj_t *lbl_score;
+    lv_obj_t *lbl_score_sh;                 // 分数 1px 黑色叠影(LVGL 无原生描边)
     lv_obj_t *lbl_ball;
     lv_obj_t *lbl_mult;
     lv_obj_t *lbl_msg;
@@ -152,7 +153,7 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_t *card = lv_obj_create(R.overlay);
     R.info_card = card;
     lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, 216, 180);
+    lv_obj_set_size(card, 216, 186);
     lv_obj_align(card, LV_ALIGN_CENTER, 0, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x0b111e), 0);
@@ -175,23 +176,34 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_set_style_text_color(R.lbl_ov_hint, lv_color_hex(0x8a97ab), 0);
     lv_obj_set_style_text_font(R.lbl_ov_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(R.lbl_ov_hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(R.lbl_ov_hint, LV_ALIGN_TOP_MID, 0, 36);    // 36..56
+    lv_obj_align(R.lbl_ov_hint, LV_ALIGN_TOP_MID, 0, 44);    // 44..64(标题下留分割线)
+
+    // UI 盘点 #3:标题与提示、提示与榜单之间各一道细分割线,视觉分组
+    static const uint32_t DIV_COL = 0x2a4a7a;
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *div = lv_obj_create(card);
+        lv_obj_remove_style_all(div);
+        lv_obj_set_size(div, 190, 1);
+        lv_obj_align(div, LV_ALIGN_TOP_MID, 0, i == 0 ? 36 : 66);
+        lv_obj_set_style_bg_color(div, lv_color_hex(DIV_COL), 0);
+        lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
+    }
 
     // 5 槽榜单(规格 §5.1):左对齐成表,数字用 %7ld 右靠齐(等宽数字)。
     R.lbl_ov_sub = lv_label_create(card);
-    lv_obj_set_size(R.lbl_ov_sub, 150, 100);
+    lv_obj_set_size(R.lbl_ov_sub, 150, 84);
     lv_obj_set_style_text_color(R.lbl_ov_sub, lv_color_hex(0xdde8f5), 0);
     lv_obj_set_style_text_font(R.lbl_ov_sub, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(R.lbl_ov_sub, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_style_pad_all(R.lbl_ov_sub, 0, 0);
-    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_TOP_MID, 0, 56);     // 56..156
+    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_TOP_MID, 0, 72);     // 72..152
 
     // 底部闪烁行:标题页 PRESS OK / 结算页新纪录提示
     R.lbl_blink = lv_label_create(card);
     lv_obj_set_width(R.lbl_blink, 200);
     lv_obj_set_style_text_font(R.lbl_blink, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(R.lbl_blink, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(R.lbl_blink, LV_ALIGN_BOTTOM_MID, 0, -2);   // 158..178
+    lv_obj_align(R.lbl_blink, LV_ALIGN_BOTTOM_MID, 0, -6);   // 底部安全边距(UI 盘点 #3)
     lv_obj_add_flag(R.lbl_blink, LV_OBJ_FLAG_HIDDEN);
 
     // 暂停菜单卡片:金色边框 + 大字选项,与台面小字/信息卡片明显区分。
@@ -280,9 +292,23 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     lv_obj_set_style_radius(R.plunger, 2, 0);
     lv_obj_add_flag(R.plunger, LV_OBJ_FLAG_HIDDEN);
 
-    // 记分板:三块 LCD 面板上的字
-    R.lbl_score = mk_panel_label(parent, PANEL_SCORE_X0, PANEL_SCORE_X1,
-                                 LV_TEXT_ALIGN_RIGHT, C_SCORE);
+    // 记分板:三块 LCD 面板上的字。UI 盘点 #1:分数是最重要信息,放大到 20px
+    // 亮黄 + 叠影描边;倍率/球数保持 14px 弱化权重。
+    R.lbl_score_sh = lv_label_create(parent);       // 影层先建,压在主字下
+    lv_obj_set_size(R.lbl_score_sh, PANEL_SCORE_X1 - PANEL_SCORE_X0 - 4, 20);
+    lv_obj_set_pos(R.lbl_score_sh, PANEL_SCORE_X0 + 3, 5);
+    lv_obj_set_style_text_align(R.lbl_score_sh, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(R.lbl_score_sh, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_text_font(R.lbl_score_sh, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_pad_all(R.lbl_score_sh, 0, 0);
+    lv_label_set_text(R.lbl_score_sh, "0");
+    R.lbl_score = lv_label_create(parent);
+    lv_obj_set_size(R.lbl_score, PANEL_SCORE_X1 - PANEL_SCORE_X0 - 4, 20);
+    lv_obj_set_pos(R.lbl_score, PANEL_SCORE_X0 + 2, 4);
+    lv_obj_set_style_text_align(R.lbl_score, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(R.lbl_score, lv_color_hex(C_SCORE), 0);
+    lv_obj_set_style_text_font(R.lbl_score, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_pad_all(R.lbl_score, 0, 0);
     lv_label_set_text(R.lbl_score, "0");
     R.lbl_mult = mk_panel_label(parent, PANEL_MULT_X0, PANEL_MULT_X1,
                                 LV_TEXT_ALIGN_CENTER, C_TEXT);
@@ -299,6 +325,10 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     lv_obj_set_style_text_align(R.lbl_msg, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(R.lbl_msg, lv_color_hex(C_MSG), 0);
     lv_obj_set_style_text_font(R.lbl_msg, &lv_font_montserrat_14, 0);
+    // UI 盘点 #2:深色半透明底板代替描边(LVGL 无文字描边),星空背景上不融字
+    lv_obj_set_style_bg_color(R.lbl_msg, lv_color_hex(0x060a14), 0);
+    lv_obj_set_style_bg_opa(R.lbl_msg, LV_OPA_70, 0);
+    lv_obj_set_style_radius(R.lbl_msg, 3, 0);
     lv_obj_set_style_pad_all(R.lbl_msg, 0, 0);
     lv_label_set_text(R.lbl_msg, "");
     lv_obj_add_flag(R.lbl_msg, LV_OBJ_FLAG_HIDDEN);
@@ -330,7 +360,7 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     // ATTACK/RANK 面板数值:背景招牌在 y 202..210,数值必须落在招牌下方。
     // 之前 lbl_fuel 放在 y=205 与 "FUEL" 招牌重叠(差距清单 C4)。
     R.lbl_attack = lv_label_create(parent);
-    lv_obj_set_size(R.lbl_attack, 42, 20);
+    lv_obj_set_size(R.lbl_attack, 42, 18);
     lv_obj_set_style_text_align(R.lbl_attack, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(R.lbl_attack, lv_color_hex(C_SCORE), 0);
     lv_obj_set_style_text_font(R.lbl_attack, &lv_font_montserrat_14, 0);
@@ -339,7 +369,7 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     lv_label_set_text_fmt(R.lbl_attack, "%lu",
                           (unsigned long)pb_bump_score(0));
     R.lbl_rank = lv_label_create(parent);
-    lv_obj_set_size(R.lbl_rank, 42, 20);
+    lv_obj_set_size(R.lbl_rank, 42, 18);
     lv_obj_set_style_text_align(R.lbl_rank, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(R.lbl_rank, lv_color_hex(C_SCORE), 0);
     lv_obj_set_style_text_font(R.lbl_rank, &lv_font_montserrat_14, 0);
@@ -392,6 +422,7 @@ void pb_render_sync(pb_game *g) {
     // 分数/球数/倍率:文本变了才重写(每次 set_text_fmt 都会重分配 + 标脏)
     if (force || g->score != R.last_score) {
         R.last_score = g->score;
+        lv_label_set_text_fmt(R.lbl_score_sh, "%lu", (unsigned long)g->score);
         lv_label_set_text_fmt(R.lbl_score, "%lu", (unsigned long)g->score);
     }
     if (force || g->ball_num != R.last_ball) {
@@ -556,7 +587,7 @@ void pb_render_sync(pb_game *g) {
                 lv_obj_clear_flag(R.lbl_ov_hint, LV_OBJ_FLAG_HIDDEN);
                 if (g->state == PB_STATE_TITLE) {
                     lv_label_set_text(R.lbl_ov_title, "SPACE PINBALL");
-                    lv_label_set_text(R.lbl_ov_hint, "UP/DOWN:FLIP OK:LAUNCH");
+                    lv_label_set_text(R.lbl_ov_hint, "UP/DOWN: FLIP | OK: LAUNCH");
                     lv_obj_set_style_text_color(R.lbl_ov_hint,
                                                 lv_color_hex(0x8a97ab), 0);
                 } else {
