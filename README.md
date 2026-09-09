@@ -4,6 +4,10 @@
 
 ![status](https://img.shields.io/badge/target-ESP32--C3-blue) ![idf](https://img.shields.io/badge/ESP--IDF-5.5.3-orange)
 
+| Gameplay | Upgrade Ready |
+| --- | --- |
+| ![gameplay](docs/assets/screenshot-gameplay.jpg) | ![upg-ready](docs/assets/screenshot-upg-ready.jpg) |
+
 ## 玩法
 
 规则、分值与台面分区逐条对标原版 Space Cadet：规格见 [`docs/space-cadet-spec.md`](docs/space-cadet-spec.md)，
