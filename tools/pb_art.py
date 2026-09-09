@@ -388,13 +388,15 @@ def paint_backdrop():
 
 
 def _plastic_panel(pt, x0, y0, x1, y1, label, sub=None):
-    pt.poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], COL_PLASTIC)
+    # UI 盘点 #2:半透明深蓝底(#082060,RGB565 静态烘焙用同色系混合)+浅蓝边框,
+    # 和星空台面背景明确区隔,不再像游戏美术的一部分。
+    pt.poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], (8, 32, 96))
     pt.poly([(x0 + 1, y0 + 1), (x1 - 1, y0 + 1), (x1 - 1, y0 + 2.4), (x0 + 1, y0 + 2.4)],
-            mix(COL_PLASTIC, COL_PLASTIC_HI, 0.55))
-    pt.rect(x0, y0, x1, y1, outline=(8, 12, 20), w=0.9)
-    pt.rect(x0 + 0.7, y0 + 0.7, x1 - 0.7, y1 - 0.7,
-            outline=mix(COL_PLASTIC_HI, (255, 255, 255), 0.35), w=0.5)
-    pt.text_c((x0 + x1) / 2.0, y0 + 4.5, label, (206, 228, 252), 1.0)
+            (110, 170, 230))
+    pt.rect(x0, y0, x1, y1, outline=(110, 170, 230), w=1.6)
+    pt.rect(x0 + 2.0, y0 + 2.0, x1 - 2.0, y1 - 2.0,
+            outline=(30, 60, 120), w=0.6)
+    pt.text_c((x0 + x1) / 2.0, y0 + 6.0, label, (210, 232, 255), 1.0)
     if sub:
         pt.text_c((x0 + x1) / 2.0, y0 + 14.0, sub, COL_GOLD, 1.0)
 
@@ -455,7 +457,8 @@ def paint_decor(g, bed):
     pt.poly([(rx - 1.4, ry + 8), (rx, ry + 14), (rx + 1.4, ry + 8)], (255, 246, 200))
 
     pt.text_arc(cx, cy + 2, r - 8.5, "SPACE CADET", 218, 322, (198, 226, 255), 0.85)
-    pt.text_c(cx, cy + r - 8, "MISSION READY", COL_GOLD, 1.0)
+    # UI 盘点 #2:徽章底部的烘焙字 "MISSION READY" 删除——事件提示由动态信息带负责,
+    # 烘焙字永远亮着且压在台面中央,与信息带职责重复(用户拍板删除)。
 
     _plastic_panel(pt, 16, 198, 58, 230, "ATTACK", None)   # 当前 bumper 档位分值
     _plastic_panel(pt, 156, 198, 198, 230, "RANK", None)    # 军衔由渲染层动态显示
@@ -487,11 +490,8 @@ def paint_lane_channel(g, img):
         y = 132 + i * 17
         pt.poly([(217, y - 6), (222, y + 2.5), (212, y + 2.5)],
                 mix(COL_GOLD, (52, 36, 10), i / 3.0))
-    # 通道净宽只有 ~22px,横排文字会被两侧导轨切掉,改成竖排单字母。
-    for i, ch in enumerate("HOLD"):
-        pt.text_c(217, 190 + i * 8, ch, (140, 168, 200), 1.0)
-    for i, ch in enumerate("FIRE"):
-        pt.text_c(217, 226 + i * 8, ch, COL_GOLD, 1.0)
+    # UI 盘点 #2:竖排 HOLD/FIRE 删除(通道净宽 22px 放不下横排,竖排难读;
+    # 发射指示由上方三枚金色箭头 + 蓝色蓄力条精灵承担,用户拍板删除)。
 
 
 def paint_static_hardware(g, img):
