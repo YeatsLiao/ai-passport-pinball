@@ -24,6 +24,8 @@
 #define SCORE_TGT_BANK  1500u     // §2.3 三个全倒
 #define SCORE_HOLE      20000u    // §2.4 a_kout3 黑洞 control_kickout_score2[0]
 #define SCORE_WELL      50000u    // §2.4 a_kout1 引力井 control_kickout_score3[0]
+#define SCORE_STAR      500u      // 右道星标单个(路过即亮)
+#define SCORE_STAR_ALL  2500u     // 一次下滑三枚全亮加成
 #define PB_SCORE_MAX    99999999u // 记分板 8 位宽;原版是 1e9 进位(§4.6)
 
 // §2.1 control_bump_scores1[BmpIndex]
@@ -179,6 +181,7 @@ void pb_game_key(pb_game *g, pb_key_t key, pb_key_ev_t ev) {
 
 static void reset_playfield(pb_game *g) {
     for (int i = 0; i < PB_LANE_COUNT; i++) g->lane_lit[i] = false;
+    for (int i = 0; i < PB_STAR_COUNT; i++) g->star_lit[i] = false;
     for (int i = 0; i < PB_TARGET_COUNT; i++) {
         g->target_down[i] = false;
         int s = pb_table_target_seg(&g->table, i);
@@ -297,6 +300,25 @@ static void on_target(pb_game *g, int idx) {
     add_ring(g);                                          // §3 组完成推进 1 段
     g->target_reset = 1.2f;                               // 稍后整组立起
     pb_audio_play(PB_SND_BONUS);
+}
+
+// 右道星标 lane_stars:回球滑道的路过判定点,无碰撞不挡球,路过即亮。
+// 一次下滑三枚全亮 → 加成后整组重置,可循环再点。
+static void on_star(pb_game *g, int idx) {
+    g->star_lit[idx] = true;
+    pb_ball *b = &g->table.world.ball;
+    uint32_t got = add_score(g, SCORE_STAR);
+    popup(g, got, b->pos.x - 6.0f, b->pos.y - 8.0f);
+    pb_audio_play(PB_SND_LANE);
+
+    bool all = true;
+    for (int i = 0; i < PB_STAR_COUNT; i++) all &= g->star_lit[i];
+    if (!all) return;
+
+    got = add_score(g, SCORE_STAR_ALL);
+    popup(g, got, b->pos.x - 6.0f, b->pos.y - 18.0f);
+    pb_audio_play(PB_SND_BONUS);
+    for (int i = 0; i < PB_STAR_COUNT; i++) g->star_lit[i] = false;
 }
 
 // §4.3 球保存只在发射瞬间武装、每球一次;用掉即熄灯(原版 Message(20))。
@@ -499,6 +521,15 @@ void pb_game_step(pb_game *g, float dt) {
             }
         }
 
+        // 右道星标:球沿右墙滑落时球心穿过判定半径即点亮(半径 9 = 标 r5 + 球 r4)。
+        if (b->active) {
+            for (int i = 0; i < PB_STAR_COUNT; i++) {
+                if (g->star_lit[i]) continue;
+                float dy = b->pos.y - (PB_STAR_Y0 + (float)i * PB_STAR_DY);
+                float dx = b->pos.x - PB_STAR_X;
+                if (dx * dx + dy * dy < 81.0f) on_star(g, i);
+            }
+        }
         // 黑洞 a_kout3:徽章行星中心的"行星虫洞"(实机反馈后从落球口移入)。
         // §2.4 20000 分 + 向上踢回挡板区;冷却期内不捕获,球自然从旁穿过。
         if (g->hole_cooldown <= 0 && b->active) {
@@ -606,6 +637,7 @@ void pb_game_step(pb_game *g, float dt) {
                 g->mult_idx = 0;                  // §4.2 每球结束倍率归 x1
                 g->ball_save_used = false;        // 新球重新获得一次球保存资格
                 for (int i = 0; i < PB_LANE_COUNT; i++) g->lane_lit[i] = false;
+                for (int i = 0; i < PB_STAR_COUNT; i++) g->star_lit[i] = false;
                 spawn_ball_in_lane(g);
                 g->state = PB_STATE_LAUNCH;
                 char buf[16];

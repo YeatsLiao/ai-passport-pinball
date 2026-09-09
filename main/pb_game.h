@@ -76,6 +76,7 @@ typedef struct {
     uint8_t rank;                   // 规格 §3:middle_circle 军衔 1..9
 
     bool lane_lit[PB_LANE_COUNT];
+    bool star_lit[PB_STAR_COUNT];   // 右道星标路过点亮态
     bool target_down[PB_TARGET_COUNT];
     float target_reset;             // >0:目标组清空后重置倒计时
     float ball_save;                // >0:球保存剩余秒数(每球最多触发一次)

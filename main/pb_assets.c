@@ -57,7 +57,7 @@ const lv_image_dsc_t pb_img_hole_1 = {
     .data = PB_ART(157068),
 };
 const lv_image_dsc_t *const pb_img_hole[2] = { &pb_img_hole_0, &pb_img_hole_1 };
-const int16_t pb_hole_pos[2] = { 92, 179 };
+const int16_t pb_hole_pos[2] = { 89, 185 };
 
 const lv_image_dsc_t pb_img_shadow = {
     .header = {

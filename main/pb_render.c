@@ -57,6 +57,7 @@ typedef struct {
     lv_obj_t *lbl_pause_item[3];
     lv_obj_t *ring_lamp[PB_RING_COUNT];     // outer_circle 点亮态(军衔进度)
     lv_obj_t *upg_lamp[PB_UPG_COUNT];       // bmpr_inc_lights 点亮态(bumper 升级)
+    lv_obj_t *star_lamp[PB_STAR_COUNT];     // 右道星标点亮态
     lv_obj_t *lbl_attack;                   // ATTACK 面板:当前 bumper 档位分值
     lv_obj_t *lbl_rank;                     // RANK 面板军衔
     lv_obj_t *well_glow;                    // 引力井吞球闪光
@@ -81,6 +82,7 @@ typedef struct {
     bool     last_pop_on[PB_POPUPS];
     uint8_t  last_ring_bits, last_ring_lit;
     uint8_t  last_upg_bits;
+    uint8_t  last_star_bits;
     uint8_t  last_rank;
     bool     last_well_glow, last_hs_glow;
     uint32_t tick;                          // 帧计数:闪烁动画相位
@@ -355,6 +357,12 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     for (int i = 0; i < PB_UPG_COUNT; i++) {
         int lx = (int)(PB_UPG_CX + (i - (PB_UPG_COUNT - 1) / 2.0f) * PB_UPG_DX);
         R.upg_lamp[i] = mk_lamp(parent, lx, (int)PB_UPG_CY, 5, C_MSG);
+    }
+
+    // 右道星标点亮态:路过即亮金色(判定逻辑在 pb_game.c on_star)。
+    for (int i = 0; i < PB_STAR_COUNT; i++) {
+        int sy = (int)(PB_STAR_Y0 + (float)i * PB_STAR_DY);
+        R.star_lamp[i] = mk_lamp(parent, (int)PB_STAR_X, sy, 6, C_SCORE);
     }
 
     // ATTACK/RANK 面板数值:背景招牌在 y 202..210,数值必须落在招牌下方。
@@ -677,6 +685,22 @@ void pb_render_sync(pb_game *g) {
             }
         }
         R.last_upg_bits = upg_bits;
+    }
+
+    // 右道星标点亮态:路过即亮,全亮加成后整组重置(逻辑在 pb_game.c on_star)。
+    uint8_t star_bits = 0;
+    for (int i = 0; i < PB_STAR_COUNT; i++)
+        if (g->star_lit[i]) star_bits |= (uint8_t)(1u << i);
+    if (force || star_bits != R.last_star_bits) {
+        for (int i = 0; i < PB_STAR_COUNT; i++) {
+            bool on = (star_bits >> i) & 1;
+            bool was = (R.last_star_bits >> i) & 1;
+            if (force || on != was) {
+                if (on) lv_obj_clear_flag(R.star_lamp[i], LV_OBJ_FLAG_HIDDEN);
+                else    lv_obj_add_flag(R.star_lamp[i], LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        R.last_star_bits = star_bits;
     }
 
     // ATTACK 面板 = 当前 bumper 档位实际分值(规格 §2.1),RANK = 9 级缩写(§3)。

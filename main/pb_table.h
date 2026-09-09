@@ -45,12 +45,20 @@ typedef struct {
 #define PB_BALL_R 4.0f
 
 // ---- 洞系(原版 kickout,规格 §2.4) ----
-// 黑洞 a_kout3:实机反馈后从落球口 (107,300) 移到徽章行星中心 (107,194),
-// 与 SPACE CADET 徽章的行星图案重合成"行星虫洞"。距环灯 45、立柱 32、
-// 侧灯 23,球心 r4 与捕获盘 r8 之间有充分通道;冷却期内洞失效球自然穿过。
-#define PB_HOLE_X 107.0f
-#define PB_HOLE_Y 194.0f
+// 黑洞 a_kout3:实机反馈后从落球口 (107,300) 移到徽章行星中心 (104,200),
+// 与 SPACE CADET 徽章的行星图案重合成"行星虫洞"。距环灯 ~45、立柱 ~27、
+// 侧灯 ~20,球心 r4 与捕获盘 r8 之间有充分通道;冷却期内洞失效球自然穿过。
+#define PB_HOLE_X 104.0f
+#define PB_HOLE_Y 200.0f
 #define PB_HOLE_R 8.0f      // 捕获半径(洞视觉半径 ~13,覆盖行星图案)
+
+// 右道星标 lane_stars:右外墙(204)内侧回球滑道的路过判定点,无碰撞不挡球。
+// 三枚收在信息带(底 144)与 ATTACK/RANK 卡片(顶 198)之间的空带内,互不重叠;
+// 球心贴墙滑落 x≈199.6,距星标 x=193 约 6.6px < 判定半径 9,必触发。
+#define PB_STAR_X   193.0f
+#define PB_STAR_Y0  150.0f
+#define PB_STAR_DY  17.0f
+#define PB_STAR_COUNT 3
 
 // 引力井 a_kout1:左上窄通道尽头的踢出洞。通道净宽 ~16px,球(r4)可通过。
 #define PB_WELL_X 21.0f

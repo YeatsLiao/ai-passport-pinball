@@ -627,6 +627,7 @@ def render_background(g):
     paint_side_holes(g, img)
     paint_ring_lamps(g, img)
     paint_upgrade_lamps(g, img)
+    paint_lane_stars(g, img)
     paint_apron_and_drain(img)
     paint_black_hole(g, img)          # 落球口里的黑洞要压在护板之上
     paint_info_strip(g, img)          # 信息带压在所有塑料件之上(文字底板)
@@ -878,6 +879,17 @@ def paint_upgrade_lamps(g, img):
         pt.ell(lx - 4.2, cy - 3.4, lx + 4.2, cy + 3.4, fill=(6, 10, 18))
         pt.ell(lx - 3.6, cy - 2.9, lx + 3.6, cy + 2.9, outline=(40, 50, 66), w=0.8)
         pt.ell(lx - 3.0, cy - 2.4, lx + 3.0, cy + 2.4, fill=COL_LENS_OFF)
+
+
+def paint_lane_stars(g, img):
+    """右道星标 lane_stars:回球滑道路过判定点的灭态底座(点亮态由渲染层叠加)。"""
+    pt = Painter(img)
+    sx, sy0, sdy, n = g["star"]
+    for i in range(n):
+        sy = sy0 + i * sdy
+        pt.ell(sx - 4.6, sy - 4.6, sx + 4.6, sy + 4.6, fill=(6, 10, 18))
+        pt.ell(sx - 3.9, sy - 3.9, sx + 3.9, sy + 3.9, outline=(40, 50, 66), w=0.8)
+        pt.ell(sx - 3.1, sy - 3.1, sx + 3.1, sy + 3.1, fill=COL_LENS_OFF)
 
 
 def paint_info_strip(g, img):
