@@ -247,7 +247,10 @@ static void on_lane(pb_game *g, int lane) {
     add_score(g, SCORE_LANE);                       // §2.2 穿越即 2000,与灯态无关
     g->lane_lit[lane] = !g->lane_lit[lane];
     pb_audio_play(PB_SND_LANE);
-    if (!g->lane_lit[lane] || g->bump_prog < PB_UPG_LAMPS) return;
+    // 升档条件(收尾简化,§6 移植偏差再登记):升级灯满后穿过任意车道即升档。
+    // 原实现要求"该车道灯由灭变亮"的 toggle 判定:车道灯是切换式,满灯后
+    // 穿过已亮车道=灭灯错过升档,实机反馈"过了好多下都没触发"的根因。
+    if (g->bump_prog < PB_UPG_LAMPS) return;
 
     g->bump_prog = 0;
     g->flash_upg = 1.0f;
@@ -474,6 +477,8 @@ void pb_game_step(pb_game *g, float dt) {
                 // §3 挡板挥动推进 bmpr_inc_lights(原版是循环移位,本固件从全灭
                 // 起,故实现为递增,见 §6 移植偏差)
                 if (g->bump_prog < PB_UPG_LAMPS) g->bump_prog++;
+                // 满灯瞬间提示下一步:穿过顶部车道即升档(实机反馈"看不懂灯组")。
+                if (g->bump_prog == PB_UPG_LAMPS) show_msg(g, "UPG READY", 2.0f);
             }
         }
     }
@@ -575,9 +580,10 @@ void pb_game_step(pb_game *g, float dt) {
             g->hs_timer -= dt;
             if (g->hs_timer <= 0) {
                 b->pos.x = PB_HS_X;
-                b->pos.y = PB_HS_Y + 12.0f;
-                b->vel.x = -40.0f;
-                b->vel.y = 260.0f;
+                b->pos.y = PB_HS_Y + 8.0f;
+                b->vel.x = -50.0f;
+                b->vel.y = -400.0f;   // 向上踢:冲出右上窄通道回顶拱(实机反馈:
+                                      // 右墙洞得到后应往上弹出去,原向下吐右道)
                 b->active = true;
             }
         }
