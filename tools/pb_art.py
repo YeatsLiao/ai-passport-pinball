@@ -9,6 +9,7 @@
 # 3. 分层作画:深空底 → 装饰 → 发光 → 护板 → 金属导轨 → 记分板边框,
 #    每一层都对应原版台面的一个物理层次。
 import math
+import os
 import random
 import re
 import sys
@@ -101,6 +102,16 @@ def parse_geometry(path):
     src = open(path, "r", encoding="utf-8").read()
     nocmt = re.sub(r"//[^\n]*", "", src)
 
+    # 把 pb_table.h 的简单数值宏展开进 C 源(宏值可能是 "150.0 + 17.0" 表达式,
+    # 由下方 eval_num 求值)。否则用宏写的 CIRCLES 行会被行正则静默跳过,
+    # 柱帽精灵数量变少、台面上柱子直接消失(实机反馈过的 bug)。
+    hdr = open(os.path.join(os.path.dirname(path), "pb_table.h"),
+               encoding="utf-8").read()
+    defines = dict(re.findall(r"#define\s+(PB_[A-Z0-9_]+)\s+([\d.\s+\-*/]+?)(?:\s*f)?\s*(?://.*)?$",
+                              hdr, re.M))
+    for name, val in defines.items():
+        nocmt = re.sub(r"\b%s\b" % name, val.strip(), nocmt)
+
     m = re.search(r"seg_def_t\s+SEGS\[\]\s*=\s*\{(.*?)\n\};", nocmt, re.S)
     if not m:
         sys.exit("parse: 找不到 SEGS 定义")
@@ -119,12 +130,13 @@ def parse_geometry(path):
     circles = []
     m = re.search(r"pb_circle\s+CIRCLES\[\]\s*=\s*\{(.*?)\n\};", nocmt, re.S)
     if m:
-        crow = re.compile(r"\{\s*\{\s*" + _NUM + r"\s*,\s*" + _NUM + r"\s*\}\s*,\s*" +
-                          _NUM + r"\s*,\s*" + _NUM + r"\s*,\s*" + _NUM +
-                          r"\s*,\s*(true|false)\s*\}")
+        crow = re.compile(r"\{\s*\{\s*([^,{}]+?)\s*,\s*([^,{}]+?)\s*\}\s*,\s*"
+                          r"([^,]+?),\s*([^,]+?),\s*([^,]+?),\s*(true|false)\s*\}")
         for mm in crow.finditer(m.group(1)):
-            cx, cy, r, _rest, _kick, _solid = mm.groups()
-            circles.append(dict(c=(float(cx), float(cy)), r=float(r)))
+            cx, cy, r = (eval_num(v) for v in mm.groups()[:3])
+            circles.append(dict(c=(cx, cy), r=r))
+    if len(circles) < 7:
+        sys.exit("parse: CIRCLES 只解析到 %d 行,正则/宏展开失配" % len(circles))
 
     flippers = []
     for mm in re.finditer(r"init_flipper\(&t->flippers\[(\d)\]\s*,\s*([^,]+),\s*"

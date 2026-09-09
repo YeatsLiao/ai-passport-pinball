@@ -9,7 +9,7 @@
 #include "lvgl.h"
 
 #define PB_ART_FLIP_FRAMES 12
-#define PB_ART_BUMP_COUNT  7
+#define PB_ART_BUMP_COUNT  10
 #define PB_ART_LANE_COUNT  3
 #define PB_ART_TGT_COUNT   3
 #define PB_ART_SLING_COUNT 2

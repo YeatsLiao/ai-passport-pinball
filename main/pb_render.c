@@ -407,17 +407,17 @@ static int flipper_frame(const pb_flipper *f) {
 // 只在变化时写 LVGL:下面 sync 里全部走 "比对缓存 -> 变了才调 setter" 的路子
 
 // 5 槽榜单文本(规格 §5.1/§5.2):空槽显示 -------,本局入榜的那行打 *。
-// 数字用 %7ld 右靠齐(montserrat 数字等宽,能对齐成表)。
+// 全部左对齐:montserrat 数字宽度不等,%7ld 填充右对齐会参差不齐(实机反馈)。
 static void fmt_hs_table(pb_game *g, char *buf, size_t n) {
     size_t off = 0;
     for (int i = 0; i < PB_HS_SLOTS; i++) {
         const char *tail = (i + 1 < PB_HS_SLOTS) ? "\n" : "";
         int w;
         if (g->hs[i] > 0)
-            w = snprintf(buf + off, n - off, "%d. %7ld%s%s", i + 1, (long)g->hs[i],
+            w = snprintf(buf + off, n - off, "%d. %ld%s%s", i + 1, (long)g->hs[i],
                          g->hs_new == (int8_t)i ? " *" : "", tail);
         else
-            w = snprintf(buf + off, n - off, "%d. %7s%s", i + 1, "-------", tail);
+            w = snprintf(buf + off, n - off, "%d. %s%s", i + 1, "-------", tail);
         if (w <= 0 || (size_t)w >= n - off) break;
         off += (size_t)w;
     }
