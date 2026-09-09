@@ -444,18 +444,8 @@ def paint_decor(g, bed):
     pt.arc(cx - r + 1.5, cy - r + 1.5, cx + r - 1.5, cy + r - 1.5, 195, 320,
            (120, 170, 220), 1.7)
 
-    # 小火箭
-    rx, ry = cx + 16, cy - 14
-    pt.poly([(rx - 2.8, ry + 8), (rx - 7.5, ry + 11), (rx - 3.0, ry + 3)], (206, 60, 46))
-    pt.poly([(rx + 2.8, ry + 8), (rx + 7.5, ry + 11), (rx + 3.0, ry + 3)], (206, 60, 46))
-    pt.poly([(rx, ry - 10), (rx + 4.4, ry), (rx + 3.0, ry + 8), (rx - 3.0, ry + 8),
-             (rx - 4.4, ry)], (226, 232, 240))
-    pt.poly([(rx, ry - 10), (rx + 4.4, ry), (rx, ry + 1)], (250, 252, 255))
-    pt.circle(rx, ry - 1.5, 2.0, fill=(96, 190, 240))
-    pt.circle(rx, ry - 1.5, 2.0, outline=(20, 40, 60), w=0.5)
-    pt.poly([(rx - 2.8, ry + 8), (rx, ry + 17), (rx + 2.8, ry + 8)], (255, 176, 60))
-    pt.poly([(rx - 1.4, ry + 8), (rx, ry + 14), (rx + 1.4, ry + 8)], (255, 246, 200))
-
+    # UI 实机反馈:徽章内火箭压在行星光环与弧字上(小屏上三重重叠),整段删除,
+    # 徽章保留"弧字 + 行星 + 金色光环"三要素。
     pt.text_arc(cx, cy + 2, r - 8.5, "SPACE CADET", 218, 322, (198, 226, 255), 0.85)
     # UI 盘点 #2:徽章底部的烘焙字 "MISSION READY" 删除——事件提示由动态信息带负责,
     # 烘焙字永远亮着且压在台面中央,与信息带职责重复(用户拍板删除)。
@@ -882,12 +872,14 @@ def paint_ring_lamps(g, img):
 def paint_upgrade_lamps(g, img):
     """bmpr_inc_lights 升级灯座:中央 bumper 裙下方三盏(点亮态由渲染层叠加)。"""
     pt = Painter(img)
+    # UI 实机反馈:三座仅隔 1.2px 且灰白描边,点亮态叠上去后观感是"歪扭的白条";
+    # 缩小灯座、拉间距、描边改暗色,灭态就是一个安静的暗底座。
     cx, cy, dx, n = g["upg"]
     for i in range(n):
         lx = cx + (i - (n - 1) / 2.0) * dx
-        pt.ell(lx - 5.4, cy - 4.4, lx + 5.4, cy + 4.4, fill=(6, 10, 18))
-        pt.ell(lx - 4.6, cy - 3.7, lx + 4.6, cy + 3.7, outline=COL_RAIL_MID, w=0.8)
-        pt.ell(lx - 3.9, cy - 3.0, lx + 3.9, cy + 3.0, fill=COL_LENS_OFF)
+        pt.ell(lx - 4.2, cy - 3.4, lx + 4.2, cy + 3.4, fill=(6, 10, 18))
+        pt.ell(lx - 3.6, cy - 2.9, lx + 3.6, cy + 2.9, outline=(40, 50, 66), w=0.8)
+        pt.ell(lx - 3.0, cy - 2.4, lx + 3.0, cy + 2.4, fill=COL_LENS_OFF)
 
 
 def paint_info_strip(g, img):

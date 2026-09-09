@@ -73,7 +73,7 @@ typedef struct {
 // bmpr_inc_lights bumper 升级灯组:三盏,排在中央 bumper 裙下方的空档里。
 #define PB_UPG_CX 107.0f
 #define PB_UPG_CY 111.0f
-#define PB_UPG_DX 12.0f
+#define PB_UPG_DX 14.0f
 #define PB_UPG_COUNT 3
 
 // info_text_box 信息带:徽章上方那条唯一的横向空档。提示文字只允许出现在这里,

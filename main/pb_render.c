@@ -354,7 +354,7 @@ void pb_render_build(pb_game *g, lv_obj_t *parent) {
     // bmpr_inc_lights bumper 升级灯组点亮态:3 盏(规格 §3)。
     for (int i = 0; i < PB_UPG_COUNT; i++) {
         int lx = (int)(PB_UPG_CX + (i - (PB_UPG_COUNT - 1) / 2.0f) * PB_UPG_DX);
-        R.upg_lamp[i] = mk_lamp(parent, lx, (int)PB_UPG_CY, 6, C_MSG);
+        R.upg_lamp[i] = mk_lamp(parent, lx, (int)PB_UPG_CY, 5, C_MSG);
     }
 
     // ATTACK/RANK 面板数值:背景招牌在 y 202..210,数值必须落在招牌下方。
@@ -587,7 +587,7 @@ void pb_render_sync(pb_game *g) {
                 lv_obj_clear_flag(R.lbl_ov_hint, LV_OBJ_FLAG_HIDDEN);
                 if (g->state == PB_STATE_TITLE) {
                     lv_label_set_text(R.lbl_ov_title, "SPACE PINBALL");
-                    lv_label_set_text(R.lbl_ov_hint, "UP/DOWN: FLIP | OK: LAUNCH");
+                    lv_label_set_text(R.lbl_ov_hint, "UP/DOWN:FLIP  OK:LAUNCH");
                     lv_obj_set_style_text_color(R.lbl_ov_hint,
                                                 lv_color_hex(0x8a97ab), 0);
                 } else {
