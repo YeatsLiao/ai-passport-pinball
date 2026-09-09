@@ -551,8 +551,9 @@ void pb_render_sync(pb_game *g) {
     if (!msg_on && g->state == PB_STATE_PLAY) {
         static const char *const IDLE_HINTS[] = {
             "FLIPS->UPG", "TARGET->MULT", "RING->RANK", "STAR->BONUS",
+            "LANES->BONUS",
         };
-        txt = IDLE_HINTS[(R.tick / 180) % 4];        // 3s 轮播一条
+        txt = IDLE_HINTS[(R.tick / 180) % 5];       // 3s 轮播一条
     }
     if (force || (txt != NULL) != R.last_msg_on
         || (txt != NULL && strcmp(txt, R.last_msg) != 0)) {

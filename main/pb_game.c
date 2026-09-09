@@ -20,6 +20,7 @@
 // ---- 分值表(§2) ----
 #define SCORE_REBO      500u      // §2.1 rebo3/4 回弹器(本台面的小立柱)
 #define SCORE_LANE      2000u     // §2.2 roll1/2/3 再入车道
+#define SCORE_LANE_ALL  5000u     // 收尾新增:三车道灯全亮成组加成(§6 偏差登记)
 #define SCORE_TGT       500u      // §2.3 target7/8/9 单个
 #define SCORE_TGT_BANK  1500u     // §2.3 三个全倒
 #define SCORE_HOLE      20000u    // §2.4 a_kout3 黑洞 control_kickout_score2[0]
@@ -242,14 +243,26 @@ void pb_game_init(pb_game *g) {
 
 // ---- 规则命中处理 ----
 
-// §3 再入车道灯是切换式:由灭变亮那一拍才检查 bumper 升级组是否已满。
+// 顶部车道灯(收尾规则,§6 移植偏差再登记):穿过即亮(原版是切换式),
+// 三盏全亮 = 车道组加成后整组清空 —— 给顶部三灯明确的成组意义
+// (实机反馈连续两轮问"顶部三个灯是干嘛的")。
 static void on_lane(pb_game *g, int lane) {
     add_score(g, SCORE_LANE);                       // §2.2 穿越即 2000,与灯态无关
-    g->lane_lit[lane] = !g->lane_lit[lane];
     pb_audio_play(PB_SND_LANE);
-    // 升档条件(收尾简化,§6 移植偏差再登记):升级灯满后穿过任意车道即升档。
-    // 原实现要求"该车道灯由灭变亮"的 toggle 判定:车道灯是切换式,满灯后
-    // 穿过已亮车道=灭灯错过升档,实机反馈"过了好多下都没触发"的根因。
+    if (!g->lane_lit[lane]) {
+        g->lane_lit[lane] = true;
+        bool all = true;
+        for (int i = 0; i < PB_LANE_COUNT; i++) all &= g->lane_lit[i];
+        if (all) {
+            pb_ball *b = &g->table.world.ball;
+            uint32_t got = add_score(g, SCORE_LANE_ALL);
+            popup(g, got, b->pos.x, b->pos.y - 10.0f);
+            show_msg(g, "LANES BONUS", 2.0f);
+            pb_audio_play(PB_SND_BONUS);
+            for (int i = 0; i < PB_LANE_COUNT; i++) g->lane_lit[i] = false;
+        }
+    }
+    // 升档条件(收尾简化):升级灯满后穿过任意车道即升档。
     if (g->bump_prog < PB_UPG_LAMPS) return;
 
     g->bump_prog = 0;
