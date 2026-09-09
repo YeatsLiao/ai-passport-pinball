@@ -160,6 +160,7 @@ def parse_geometry(path):
 
     return dict(segs=segs, circles=circles, flippers=flippers, flip_len=flen,
                 lanes=lanes, lane_y=lane_y, ball_r=ball_r,
+                star_count=int(float(defines.get("PB_STAR_COUNT", "0"))),
                 walls=segs_of("PB_SEG_WALL"), slings=segs_of("PB_SEG_SLING"),
                 targets=segs_of("PB_SEG_TARGET"), gates=segs_of("PB_SEG_GATE"),
                 floors=segs_of("PB_SEG_FLOOR"))
@@ -778,6 +779,24 @@ def draw_bumper_cap(pt, cx, cy, r, lit):
         pt.circle(cx, cy, cr * 0.42, fill=(255, 248, 214))
 
 
+def draw_star_cap(pt, cx, cy, r, lit):
+    # 右道星柱柱帽:四角星形,与 bumper/立柱的圆形柱帽一眼可分(实机反馈 #4)。
+    outer = r * 0.60 + 3.6
+    inner = outer * 0.40
+    pts = []
+    for i in range(8):
+        a = -math.pi / 2 + i * math.pi / 4
+        rad = outer if i % 2 == 0 else inner
+        pts.append((cx + rad * math.cos(a), cy + rad * math.sin(a)))
+    if lit:
+        pt.circle(cx, cy, outer + 2.0, fill=(126, 68, 14))
+        pt.circle(cx, cy, outer + 1.0, fill=(255, 188, 86))
+    pt.poly(pts, fill=(255, 214, 110) if lit else (186, 158, 92),
+            outline=(52, 42, 18), w=0.6)
+    pt.circle(cx, cy, inner * 0.62,
+              fill=(255, 250, 230) if lit else (238, 232, 214))
+
+
 def draw_lens(pt, cx, cy, on):
     rx, ry = 6.2, 4.2
     if on:
@@ -954,13 +973,18 @@ def render_sprites(g):
     sp["flip"] = flip
 
     bump = []
-    for c in g["circles"]:
+    star_n = int(g.get("star_count", 0))
+    for i, c in enumerate(g["circles"]):
         cx, cy, cr = c["c"][0], c["c"][1], c["r"]
-        rad = cr * 0.60 + 3.6
+        # 数组尾部 PB_STAR_COUNT 枚是右道星柱:星形柱帽(与 C 侧
+        # circle_count - PB_STAR_COUNT 的识别约定一致)。
+        is_star = star_n > 0 and i >= len(g["circles"]) - star_n
+        cap = draw_star_cap if is_star else draw_bumper_cap
+        rad = cr * 0.60 + (5.8 if is_star else 3.6)   # 星形点亮光晕比圆帽大
         bump.append([
-            make_sprite(lambda pt, cx=cx, cy=cy, cr=cr: draw_bumper_cap(pt, cx, cy, cr, False),
+            make_sprite(lambda pt, cap=cap, cx=cx, cy=cy, cr=cr: cap(pt, cx, cy, cr, False),
                         cx - rad, cy - rad, cx + rad, cy + rad),
-            make_sprite(lambda pt, cx=cx, cy=cy, cr=cr: draw_bumper_cap(pt, cx, cy, cr, True),
+            make_sprite(lambda pt, cap=cap, cx=cx, cy=cy, cr=cr: cap(pt, cx, cy, cr, True),
                         cx - rad, cy - rad, cx + rad, cy + rad),
         ])
     sp["bump"] = bump

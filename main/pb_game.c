@@ -532,7 +532,7 @@ void pb_game_step(pb_game *g, float dt) {
                                 &g->hole_timer, &g->hole_cooldown, HOLE_COOLDOWN_S);
             }
         }
-        // 引力井 a_kout1:§2.4 50000 分,长冷却,沿通道向下吐回台面。
+        // 引力井 a_kout1:§2.4 50000 分,长冷却,沿左上窄通道向上踢回顶拱。
         if (g->well_cooldown <= 0 && b->active) {
             float hx = b->pos.x - PB_WELL_X, hy = b->pos.y - PB_WELL_Y;
             if (hx * hx + hy * hy < PB_WELL_R * PB_WELL_R) {
@@ -563,10 +563,11 @@ void pb_game_step(pb_game *g, float dt) {
         if (g->well_timer > 0) {
             g->well_timer -= dt;
             if (g->well_timer <= 0) {
-                b->pos.x = PB_WELL_X - 1.0f;
-                b->pos.y = PB_WELL_Y + 12.0f;
-                b->vel.x = 40.0f;
-                b->vel.y = 260.0f;
+                b->pos.x = PB_WELL_X;
+                b->pos.y = PB_WELL_Y + 8.0f;
+                b->vel.x = 12.0f;
+                b->vel.y = -420.0f;   // 向上踢:冲出左上窄通道回顶拱(实机反馈 #3:
+                                      // 原向下吐回左导轨,捕获感像白吞一球)
                 b->active = true;
             }
         }

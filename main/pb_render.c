@@ -84,6 +84,8 @@ typedef struct {
     uint8_t  last_upg_bits;
     uint8_t  last_star_bits;
     uint8_t  last_rank;
+    int      panel_flash;                   // 升档/升衔时面板闪白计数(tick)
+    bool     last_pf;
     bool     last_well_glow, last_hs_glow;
     uint32_t tick;                          // 帧计数:闪烁动画相位
     bool     primed;
@@ -173,11 +175,13 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_align(R.lbl_ov_title, LV_ALIGN_TOP_MID, 0, 6);    // 6..34
 
     // 副标题行:标题页放操作提示(规格 §4 操作方式),结算页放本局总分。
+    // 与榜单同宽同锚点 + 左对齐:卡片内多行文本左缘统一成一条竖线,
+    // 居中会让短行产生行首空白、与左对齐的榜单间距不一致(实机反馈 #1)。
     R.lbl_ov_hint = lv_label_create(card);
-    lv_obj_set_width(R.lbl_ov_hint, 200);
+    lv_obj_set_width(R.lbl_ov_hint, 150);
     lv_obj_set_style_text_color(R.lbl_ov_hint, lv_color_hex(0x8a97ab), 0);
     lv_obj_set_style_text_font(R.lbl_ov_hint, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(R.lbl_ov_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_align(R.lbl_ov_hint, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_align(R.lbl_ov_hint, LV_ALIGN_TOP_MID, 0, 38);    // 两行 38..66(标题下留分割线)
 
     // UI 盘点 #3:标题与提示、提示与榜单之间各一道细分割线,视觉分组
@@ -540,13 +544,25 @@ void pb_render_sync(pb_game *g) {
         }
     }
 
-    // 台面提示
+    // 台面提示:事件消息优先;PLAY 空闲时轮播灯组触发条件一行式提示
+    // (实机反馈 #5:灯组"感觉没用"=玩家不知道规则,规则常驻信息带)。
     bool msg_on = (g->msg_timer > 0 && g->msg[0]);
-    if (force || msg_on != R.last_msg_on || (msg_on && strcmp(g->msg, R.last_msg) != 0)) {
-        R.last_msg_on = msg_on;
-        if (msg_on) {
-            snprintf(R.last_msg, sizeof(R.last_msg), "%s", g->msg);
-            lv_label_set_text(R.lbl_msg, g->msg);
+    const char *txt = msg_on ? g->msg : NULL;
+    if (!msg_on && g->state == PB_STATE_PLAY) {
+        static const char *const IDLE_HINTS[] = {
+            "FLIPS: UPG", "TARGET: MULT", "RING: RANK", "STARS: BONUS",
+        };
+        txt = IDLE_HINTS[(R.tick / 180) % 4];        // 3s 轮播一条
+    }
+    if (force || (txt != NULL) != R.last_msg_on
+        || (txt != NULL && strcmp(txt, R.last_msg) != 0)) {
+        R.last_msg_on = (txt != NULL);
+        if (txt) {
+            snprintf(R.last_msg, sizeof(R.last_msg), "%s", txt);
+            lv_label_set_text(R.lbl_msg, txt);
+            // 轮播提示用暗灰蓝,与事件消息的金色区分权重
+            lv_obj_set_style_text_color(R.lbl_msg,
+                lv_color_hex(msg_on ? C_MSG : 0x7d8ba0), 0);
             lv_obj_clear_flag(R.lbl_msg, LV_OBJ_FLAG_HIDDEN);
         } else {
             R.last_msg[0] = '\0';
@@ -706,12 +722,22 @@ void pb_render_sync(pb_game *g) {
     // ATTACK 面板 = 当前 bumper 档位实际分值(规格 §2.1),RANK = 9 级缩写(§3)。
     if (force || g->ring_lit != R.last_ring_lit || g->bump_tier != R.last_bump_tier
         || g->rank != R.last_rank) {
+        if (!force && (g->bump_tier != R.last_bump_tier || g->rank != R.last_rank))
+            R.panel_flash = 48;               // 升档/升衔:面板闪白 ~0.8s 强化感知
         R.last_ring_lit = g->ring_lit;
         R.last_bump_tier = g->bump_tier;
         R.last_rank = g->rank;
         lv_label_set_text_fmt(R.lbl_attack, "%lu",
                               (unsigned long)pb_bump_score(g->bump_tier));
         lv_label_set_text(R.lbl_rank, pb_rank_name(g->rank));
+    }
+    if (R.panel_flash > 0) R.panel_flash--;
+    bool pf = R.panel_flash > 0 && ((R.tick / 4) & 1);
+    if (force || pf != R.last_pf) {
+        R.last_pf = pf;
+        uint32_t pcol = pf ? 0xffffff : C_SCORE;
+        lv_obj_set_style_text_color(R.lbl_attack, lv_color_hex(pcol), 0);
+        lv_obj_set_style_text_color(R.lbl_rank, lv_color_hex(pcol), 0);
     }
 
     // 侧洞吞球闪光

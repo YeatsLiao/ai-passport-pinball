@@ -544,11 +544,11 @@ const lv_image_dsc_t pb_img_bump_7_0 = {
         .magic = LV_IMAGE_HEADER_MAGIC,
         .cf = LV_COLOR_FORMAT_RGB565A8,
         .flags = 0,
-        .w = 12,
-        .h = 12,
-        .stride = 24,
+        .w = 16,
+        .h = 16,
+        .stride = 32,
     },
-    .data_size = 432,
+    .data_size = 768,
     .data = PB_ART(237120),
 };
 const lv_image_dsc_t pb_img_bump_7_1 = {
@@ -556,60 +556,60 @@ const lv_image_dsc_t pb_img_bump_7_1 = {
         .magic = LV_IMAGE_HEADER_MAGIC,
         .cf = LV_COLOR_FORMAT_RGB565A8,
         .flags = 0,
-        .w = 12,
-        .h = 12,
-        .stride = 24,
+        .w = 16,
+        .h = 16,
+        .stride = 32,
     },
-    .data_size = 432,
-    .data = PB_ART(237552),
+    .data_size = 768,
+    .data = PB_ART(237888),
 };
 const lv_image_dsc_t pb_img_bump_8_0 = {
     .header = {
         .magic = LV_IMAGE_HEADER_MAGIC,
         .cf = LV_COLOR_FORMAT_RGB565A8,
         .flags = 0,
-        .w = 12,
-        .h = 12,
-        .stride = 24,
+        .w = 16,
+        .h = 16,
+        .stride = 32,
     },
-    .data_size = 432,
-    .data = PB_ART(237984),
+    .data_size = 768,
+    .data = PB_ART(238656),
 };
 const lv_image_dsc_t pb_img_bump_8_1 = {
     .header = {
         .magic = LV_IMAGE_HEADER_MAGIC,
         .cf = LV_COLOR_FORMAT_RGB565A8,
         .flags = 0,
-        .w = 12,
-        .h = 12,
-        .stride = 24,
+        .w = 16,
+        .h = 16,
+        .stride = 32,
     },
-    .data_size = 432,
-    .data = PB_ART(238416),
+    .data_size = 768,
+    .data = PB_ART(239424),
 };
 const lv_image_dsc_t pb_img_bump_9_0 = {
     .header = {
         .magic = LV_IMAGE_HEADER_MAGIC,
         .cf = LV_COLOR_FORMAT_RGB565A8,
         .flags = 0,
-        .w = 12,
-        .h = 12,
-        .stride = 24,
+        .w = 16,
+        .h = 16,
+        .stride = 32,
     },
-    .data_size = 432,
-    .data = PB_ART(238848),
+    .data_size = 768,
+    .data = PB_ART(240192),
 };
 const lv_image_dsc_t pb_img_bump_9_1 = {
     .header = {
         .magic = LV_IMAGE_HEADER_MAGIC,
         .cf = LV_COLOR_FORMAT_RGB565A8,
         .flags = 0,
-        .w = 12,
-        .h = 12,
-        .stride = 24,
+        .w = 16,
+        .h = 16,
+        .stride = 32,
     },
-    .data_size = 432,
-    .data = PB_ART(239280),
+    .data_size = 768,
+    .data = PB_ART(240960),
 };
 const lv_image_dsc_t *const pb_img_bump[10][2] = {
     { &pb_img_bump_0_0, &pb_img_bump_0_1 },
@@ -632,9 +632,9 @@ const int16_t pb_bump_pos[10][2] = {
     { 149, 173 },
     { 72, 202 },
     { 130, 202 },
-    { 183, 144 },
-    { 183, 161 },
-    { 183, 178 },
+    { 181, 142 },
+    { 181, 159 },
+    { 181, 176 },
 };
 
 const lv_image_dsc_t pb_img_lane_0 = {
@@ -647,7 +647,7 @@ const lv_image_dsc_t pb_img_lane_0 = {
         .stride = 36,
     },
     .data_size = 756,
-    .data = PB_ART(239712),
+    .data = PB_ART(241728),
 };
 const lv_image_dsc_t pb_img_lane_1 = {
     .header = {
@@ -659,7 +659,7 @@ const lv_image_dsc_t pb_img_lane_1 = {
         .stride = 36,
     },
     .data_size = 756,
-    .data = PB_ART(240468),
+    .data = PB_ART(242484),
 };
 const lv_image_dsc_t *const pb_img_lane[2] = { &pb_img_lane_0, &pb_img_lane_1 };
 const int16_t pb_lane_pos[3][2] = {
@@ -678,7 +678,7 @@ const lv_image_dsc_t pb_img_tgt_0 = {
         .stride = 48,
     },
     .data_size = 1296,
-    .data = PB_ART(241224),
+    .data = PB_ART(243240),
 };
 const lv_image_dsc_t pb_img_tgt_1 = {
     .header = {
@@ -690,7 +690,7 @@ const lv_image_dsc_t pb_img_tgt_1 = {
         .stride = 48,
     },
     .data_size = 1296,
-    .data = PB_ART(242520),
+    .data = PB_ART(244536),
 };
 const lv_image_dsc_t *const pb_img_tgt[2] = { &pb_img_tgt_0, &pb_img_tgt_1 };
 const int16_t pb_tgt_pos[3][2] = {
@@ -709,7 +709,7 @@ const lv_image_dsc_t pb_img_sling_0_0 = {
         .stride = 68,
     },
     .data_size = 3060,
-    .data = PB_ART(243816),
+    .data = PB_ART(245832),
 };
 const lv_image_dsc_t pb_img_sling_0_1 = {
     .header = {
@@ -721,7 +721,7 @@ const lv_image_dsc_t pb_img_sling_0_1 = {
         .stride = 68,
     },
     .data_size = 3060,
-    .data = PB_ART(246876),
+    .data = PB_ART(248892),
 };
 const lv_image_dsc_t pb_img_sling_1_0 = {
     .header = {
@@ -733,7 +733,7 @@ const lv_image_dsc_t pb_img_sling_1_0 = {
         .stride = 68,
     },
     .data_size = 3060,
-    .data = PB_ART(249936),
+    .data = PB_ART(251952),
 };
 const lv_image_dsc_t pb_img_sling_1_1 = {
     .header = {
@@ -745,7 +745,7 @@ const lv_image_dsc_t pb_img_sling_1_1 = {
         .stride = 68,
     },
     .data_size = 3060,
-    .data = PB_ART(252996),
+    .data = PB_ART(255012),
 };
 const lv_image_dsc_t *const pb_img_sling[2][2] = {
     { &pb_img_sling_0_0, &pb_img_sling_0_1 },
