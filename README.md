@@ -1,112 +1,197 @@
-# ai-passport-pinball
+# AI Passport Pinball · 太空弹球
 
-基于 [FoloToy AI Passport](https://github.com/FoloToy/ai-passport)（ESP32-C3 + ST7789P3 240x320 彩屏）的弹球游戏固件，玩法与台面结构对标 Windows 经典 **3D Pinball / Space Cadet**。
+![太空弹球](docs/assets/cover.png)
 
-![status](https://img.shields.io/badge/target-ESP32--C3-blue) ![idf](https://img.shields.io/badge/ESP--IDF-5.5.3-orange)
+把 [FoloToy AI Passport](https://github.com/FoloToy/ai-passport) 变成一台掌上弹球机——复刻 Windows 经典 **3D Pinball / Space Cadet**，三颗按钮、三颗球、无限上头。
 
-| Gameplay | Upgrade Ready |
-| --- | --- |
-| ![gameplay](docs/assets/screenshot-gameplay.jpg) | ![upg-ready](docs/assets/screenshot-upg-ready.jpg) |
+无需配网，开机即玩。
 
-## 玩法
+| 游戏中 | 升级就绪 |
+|:---:|:---:|
+| ![游戏中](docs/assets/screenshot-gameplay.jpg) | ![升级就绪](docs/assets/screenshot-upg-ready.jpg) |
 
-规则、分值与台面分区逐条对标原版 Space Cadet：规格见 [`docs/space-cadet-spec.md`](docs/space-cadet-spec.md)，
-实现对照状态见 [`docs/spec-compliance.md`](docs/spec-compliance.md)。下文的 §n 为规格条目号。
+## 怎么玩
 
-| 得分点 | base 分值 | 规格出处 |
-| --- | --- | --- |
-| 攻击 bumper ×3（中上） | 500 / 1000 / 1500 / 2000，按升级档位取 | §2.1 `control_bump_scores1[BmpIndex]` |
-| 回弹立柱 ×4（环区） | 500 | §2.1 `control_rebo_score1[0]` |
-| 弹弓 ×2（挡板上方两侧） | 500 | §2.1 `rebo3/4` |
-| 顶部再入车道 ×3 | 2000；三盏全亮额外 +5000 后清空 | §2.2 `roll1/2/3` + D9 |
-| 倍率目标 ×3（左侧） | 单个 500；三个全倒 1500 并倍率升档 | §2.3 `target7/8/9` |
-| 星柱 ×3（右道） | 单个 500；三个全亮 2500 后清空 | D3 右道星柱 |
-| 黑洞（两挡板之间的落球口） | 20000，吐球后冷却 6.0s | §2.4 `a_kout3` |
-| 引力井（左上窄道） | 50000，冷却 8.0s；向上踢回顶拱 | §2.4 `a_kout1` + D10 |
-| 超空间洞（右上发射道旁） | 10000 / 20000 / 50000 / 150000，按灯环档位取，满 4 清环，冷却 3.0s；向上踢回顶拱 | §2.4 `a_kout2` + D11 |
+| 按键 | 功能 |
+|------|------|
+| 上键 | 左挡板 |
+| 下键 | 右挡板 |
+| 确定键 | 按住蓄力，松开发射 |
+| 确定键长按 | 暂停菜单 |
 
-- **倍率**：实际入账 = base × 倍率，档位 x1/x2/x3/x5/x10，由倍率目标组完成推进，**每颗球结束归 x1**（§4.2）。
-- **bumper 升级**：挥挡板点亮中央三盏升级灯，满 3 盏后穿过任意顶部车道即升档 +1（RC 5 "Weapons Upgraded"），满灯瞬间信息带提示 "UPG READY"（D12）。
-- **顶部车道组**：穿过即亮（不再切换灭），三盏全亮 = +5000 车道组加成后清空（D9）。
-- **星柱**：右道三颗四角星形柱，撞亮一枚 +500，三枚全亮 +2500 重置循环。
-- **军衔晋升**：倍率目标组完成推进进度环 1 段，满 5 段晋升 1 级，共 9 级 CDT→FADM；晋升**不计分**（§3 `AddRankProgress`）。
-- **球数与球保存**：3 颗球（§4.1）；每次发射瞬间武装一次球保存，5.0s 内掉落自动救回且球数不减（§4.3）。
-- **最高分**：5 槽榜单 + 插入下移 + 校验和，NVS 持久化；标题页与结算页显示榜单，本局入榜行标 `*`（§5）。
-- 记分板为 8 位宽，分数封顶 99999999（显示位宽限制，登记为规格 §6.1 偏差 D5）。
-- 不移植的元素（任务链、multiball、多玩家、tilt、螺旋滑道、虫洞 sink 等）见规格 §6，代码中不出现其变体。
+1. 开机进入标题画面，按任意键开始
+2. 按住确定键蓄力，松开发射弹球
+3. 用左右挡板接住球，撞击各种得分点刷分
+4. 三颗球用完结算，挑战最高分
 
-## 操作（三按键）
+## 亮点
 
-| 按键 | 标题页 | 结算页 | 发球道 | 台面 | 暂停菜单 |
-| --- | --- | --- | --- | --- | --- |
-| 上键 | 开始游戏 | 回标题 | — | 左挡板 | 上一项 |
-| 下键 | 开始游戏 | 回标题 | — | 右挡板 | 下一项 |
-| 确定键 | 开始游戏 | 回标题 | 按住蓄力、松开发射 | — | 确认当前选项 |
-| 确定键长按 | — | — | 呼出暂停菜单 | 呼出暂停菜单 | — |
+- **经典复刻**：台面布局、得分规则、倍率系统逐条对标原版 Space Cadet
+- **bumper 升级**：挥挡板点亮升级灯，满三盏穿过车道即可升级，bumper 分值翻倍
+- **倍率冲刺**：击倒左侧三个目标，倍率从 x1 一路飙到 x10
+- **军衔晋升**：从 Cadet 到 Fleet Admiral，9 级军衔等你晋升
+- **三大特殊洞**：黑洞（20000 分）、引力井（50000 分）、超空间洞（最高 150000 分）
+- **球保存**：每颗球发射后 5 秒内掉球自动救回，不怕开局翻车
+- **最高分榜单**：5 槽排行榜，NVS 持久化，断电不丢
 
-暂停菜单三项：RESUME（继续）/ RESTART（重开）/ EXIT（回标题）；后两项都会先结算本局分数并写入最高分榜单。
+## 快速上手（完整安装教程）
 
-## 构建
+### 1. 安装 ESP-IDF
 
-需要 ESP-IDF 5.5.3（目标 `esp32c3`）：
+需要 [ESP-IDF v5.5.3](https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32c3/get-started/)。
+
+**Windows**：下载 [离线安装器](https://dl.espressif.com/dl/esp-idf/)，安装后打开 ESP-IDF 终端。
+
+**Linux/macOS**：
+```bash
+git clone -b v5.5.3 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+cd ~/esp/esp-idf && ./install.sh esp32c3
+. $HOME/esp/esp-idf/export.sh
+```
+
+### 2. 获取代码 & 编译
 
 ```bash
+git clone https://github.com/YeatsLiao/ai-passport-pinball.git
+cd ai-passport-pinball
 idf.py set-target esp32c3
 idf.py build
-idf.py -p <PORT> flash monitor
+idf.py merge-bin
+copy build\merged-binary.bin build\ai-passport-pinball-full.bin
 ```
 
-主机单元测试（无需 ESP-IDF，任意 C 编译器）：
+### 3. 烧录
 
 ```bash
-./tools/host_test.sh    # 物理引擎与台面几何的断言测试
+# Windows: 将 COM3 替换为实际串口号（设备管理器中查看）
+idf.py -p COM3 flash monitor
+
+# Linux/macOS
+idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-台面美术为构建前烘焙（需要 Python 3 + Pillow）：
+烧录完成后设备自动启动，屏幕显示标题画面，按任意键开始游戏。
+
+## 烧录预编译固件（可选）
+
+从 [Releases](../../releases) 下载 `ai-passport-pinball-full.bin`，使用 `esptool.py` 从 `0x0` 一步烧录（镜像已含 bootloader + 分区表 + 应用）：
 
 ```bash
-python tools/gen_assets.py --preview   # 重新生成 main/assets/pb_art.bin + pb_assets.c/.h,
-                                       # 并导出 build/art/*.png 预览图供肉眼校对
+esptool.py --chip esp32c3 -p COM3 --baud 460800 write_flash 0x0 ai-passport-pinball-full.bin
 ```
 
-生成器直接解析 `main/pb_table.c` 里的碰撞几何作画，所以美术与物理永远像素级对齐；改台面坐标后重跑一次即可。
+> 将 `COM3` 替换为设备实际串口号。Windows 可在设备管理器中查看。
 
-## 素材与来源说明
+## 文档
 
-- **台面视觉**：由 `tools/pb_art.py` + `tools/gen_assets.py` 程序化手绘（PIL 超采样绘制 → 烘焙成一张 240x320 RGB565 背景 + 一组 RGB565A8 精灵），风格对标 Space Cadet 的深空底 / 铬导轨 / 黄挡板 / 红 bumper，**未复制任何原版二进制素材**。
-- **音效**：固件内合成的方波/扫频短音，非原版采样。
-- **台面布局与规则**：对标 Microsoft 3D Pinball *Space Cadet*，台面分区、得分点分值、灯光推进与最高分
-  规则均从 `k4zmu2a` 逆向源码逐条提取为书面规格后实现；数值取自源码分值表，坐标按 240x320 竖屏重新布局。
-- 若后续引入原版提取的位图/音频素材：版权归 Microsoft/Cinematronix 所有，仅供个人学习研究，请勿随固件分发或商用。
+- [技术规格](docs/space-cadet-spec.md)：原版规则与分值对照
+- [规格对照](docs/spec-compliance.md)：实现与原版的一致性
 
 ## 致谢
 
-- [FoloToy ai-passport](https://github.com/FoloToy/ai-passport) —— BSP 组件（显示/LVGL/按键/音频）、分区表与 Recovery 兼容契约均沿用该模板。
-- [k4zmu2a/SpaceCadetPinball](https://github.com/k4zmu2a/SpaceCadetPinball) —— 原版规则与台面结构的逆向参考。
-- [sanderdesnaijer/esp32-pinball](https://github.com/sanderdesnaijer/esp32-pinball)（MIT）—— 物理引擎子步长碰撞思路的参考。
+- [FoloToy AI Passport](https://github.com/FoloToy/ai-passport) — 硬件平台与 BSP 组件
+- [SpaceCadetPinball](https://github.com/k4zmu2a/SpaceCadetPinball) — 原版规则与台面结构的逆向参考
 
-## 代码结构
+## 许可证
 
+MIT
+
+---
+
+# AI Passport Pinball (English)
+
+![Space Pinball](docs/assets/cover.png)
+
+Turn your [FoloToy AI Passport](https://github.com/FoloToy/ai-passport) into a pocket pinball machine — a faithful tribute to the classic Windows **3D Pinball / Space Cadet**. Three buttons, three balls, endlessly addictive.
+
+No network needed. Power on and play.
+
+| Gameplay | Upgrade Ready |
+|:---:|:---:|
+| ![Gameplay](docs/assets/screenshot-gameplay.jpg) | ![Upgrade Ready](docs/assets/screenshot-upg-ready.jpg) |
+
+## How to Play
+
+| Button | Action |
+|--------|--------|
+| Up | Left flipper |
+| Down | Right flipper |
+| OK | Hold to charge, release to launch |
+| OK (long press) | Pause menu |
+
+1. Power on to the title screen, press any key to start
+2. Hold OK to charge power, release to launch the ball
+3. Use left and right flippers to keep the ball in play
+4. Three balls per game — chase the high score!
+
+## Highlights
+
+- **Classic tribute**: table layout, scoring rules, multiplier system faithfully adapted from Space Cadet
+- **Bumper upgrades**: hit flippers to light upgrade lamps, then shoot through lanes to power up bumpers
+- **Multiplier rush**: knock down three targets to boost from x1 all the way to x10
+- **Rank promotion**: climb from Cadet to Fleet Admiral across 9 ranks
+- **Three special holes**: Black Hole (20,000), Gravity Well (50,000), Hyperspace (up to 150,000)
+- **Ball save**: 5-second ball save after each launch — no early drain worries
+- **High score board**: 5-slot leaderboard, saved to NVS — persists across power cycles
+
+## Quick Start
+
+### 1. Install ESP-IDF
+
+Requires [ESP-IDF v5.5.3](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/get-started/).
+
+**Windows**: Download the [offline installer](https://dl.espressif.com/dl/esp-idf/) and open the ESP-IDF terminal after installation.
+
+**Linux/macOS**:
+```bash
+git clone -b v5.5.3 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+cd ~/esp/esp-idf && ./install.sh esp32c3
+. $HOME/esp/esp-idf/export.sh
 ```
-main/
-  main.c        入口: BSP 初始化 + 60Hz lv_timer 驱动
-  pb_physics.c  物理核心: 自适应子步长、圆/线段/旋转挡板碰撞、单向阀
-  pb_table.c    台面几何: 墙/弹弓/目标/bumper/发球道数据(美术的唯一真相源)
-  pb_game.c     规则状态机: 计分/倍率/球数/球保存/最高分(NVS)
-  pb_render.c   LVGL 渲染: 背景位图 + 精灵换帧,静态台面不重绘
-  pb_assets.c   生成物: lv_image_dsc_t 资产表,指向 pb_art.bin 内偏移
-  pb_audio.c    合成音效: 独立任务 + 队列,不阻塞 UI
-main/assets/
-  pb_art.bin    生成物: 烘焙台面位图 + 精灵(EMBED_FILES 嵌入 .rodata,不占 RAM)
-tools/
-  pb_art.py     美术库: 调色板/点阵字体/分层绘制/精灵生成
-  gen_assets.py 驱动: 解析几何 -> 出图 -> 打包 bin -> 生成 C 表 -> 导出预览
-  host_test.sh  主机单元测试入口
-components/bsp/ 模板 BSP(未改动)
-docs/           规格表、差距清单、规格对照表
-tests/          主机单元测试(纯 C,无 IDF 依赖;含台面布局不变量)
+
+### 2. Get the Code & Build
+
+```bash
+git clone https://github.com/YeatsLiao/ai-passport-pinball.git
+cd ai-passport-pinball
+idf.py set-target esp32c3
+idf.py build
+idf.py merge-bin
+copy build\merged-binary.bin build\ai-passport-pinball-full.bin
 ```
 
-## 模板契约
+### 3. Flash
 
-沿用 ai-passport 模板的强制约定：3MB 应用分区上限、`cardid@0x356000`、永久 Recovery `@0x700000`、开机长按上键 5 秒进 Recovery 的 bootloader 钩子（`bootloader_components/`），二创请勿改动分区表。
+```bash
+# Windows: Replace COM3 with your actual serial port (check Device Manager)
+idf.py -p COM3 flash monitor
+
+# Linux/macOS
+idf.py -p /dev/ttyACM0 flash monitor
+```
+
+After flashing, the device starts automatically and shows the title screen. Press any key to play.
+
+## Flash Prebuilt Firmware (Optional)
+
+Download `ai-passport-pinball-full.bin` from [Releases](../../releases) and flash from `0x0` with `esptool.py` (the merged image includes bootloader + partition table + app):
+
+```bash
+esptool.py --chip esp32c3 -p COM3 --baud 460800 write_flash 0x0 ai-passport-pinball-full.bin
+```
+
+> Replace `COM3` with your actual serial port. On Windows, check Device Manager.
+
+## Documentation
+
+- [Technical spec](docs/space-cadet-spec.md): original rules and scoring reference
+- [Spec compliance](docs/spec-compliance.md): implementation vs. original consistency
+
+## Acknowledgments
+
+- [FoloToy AI Passport](https://github.com/FoloToy/ai-passport) — Hardware platform and BSP components
+- [SpaceCadetPinball](https://github.com/k4zmu2a/SpaceCadetPinball) — Reverse-engineered reference for original rules and table layout
+
+## License
+
+MIT
