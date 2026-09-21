@@ -1,6 +1,6 @@
 # AI Passport Pinball · 太空弹球
 
-![太空弹球](docs/assets/cover.png)
+![太空弹球](docs/assets/cover.jpg)
 
 把 [FoloToy AI Passport](https://github.com/FoloToy/ai-passport) 变成一台掌上弹球机——复刻 Windows 经典 **3D Pinball / Space Cadet**，三颗按钮、三颗球、无限上头。
 
@@ -100,7 +100,7 @@ MIT
 
 # AI Passport Pinball (English)
 
-![Space Pinball](docs/assets/cover.png)
+![Space Pinball](docs/assets/cover.jpg)
 
 Turn your [FoloToy AI Passport](https://github.com/FoloToy/ai-passport) into a pocket pinball machine — a faithful tribute to the classic Windows **3D Pinball / Space Cadet**. Three buttons, three balls, endlessly addictive.
 
