@@ -10,9 +10,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$env:IDF_TOOLS_PATH = "D:\Software\Espressif"
-$env:IDF_PATH = "D:\Software\Espressif\frameworks\esp-idf-v5.5.5"
-$Python = "D:\Software\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe"
+$env:IDF_TOOLS_PATH = "D:\1.Soft\Espressif"
+$env:IDF_PATH = "D:\1.Soft\Espressif\frameworks\esp-idf-v5.5.5"
+$Python = "D:\1.Soft\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe"
 
 if (-not (Test-Path $Python)) { throw "python env not found: $Python" }
 
@@ -34,6 +34,6 @@ $env:PYTHONPATH = $null
 & $Python "$env:IDF_PATH\tools\check_python_dependencies.py"
 if ($LASTEXITCODE -ne 0) { throw "python dependency check failed" }
 
-Set-Location "D:\Project\ai-passport-pinball\ai-passport-pinball"
+Set-Location "D:\2.Project\ai-passport-pinball"
 & $Python "$env:IDF_PATH\tools\idf.py" @IdfArgs
 exit $LASTEXITCODE
