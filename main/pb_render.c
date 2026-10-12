@@ -47,14 +47,25 @@ typedef struct {
     lv_obj_t *lbl_mult;
     lv_obj_t *lbl_msg;
     lv_obj_t *popup_lbl[PB_POPUPS];         // 得分飘字
-    lv_obj_t *overlay;                      // 标题/结算/暂停浮层容器(不遮盖记分板)
-    lv_obj_t *info_card;                    // 标题/结算卡片
-    lv_obj_t *lbl_ov_title;
+    lv_obj_t *overlay;                      // 标题/结算/暂停/设置/榜单浮层容器(不遮盖记分板)
+    lv_obj_t *lbl_batt;                     // 右上角电量角标(overlay 子,随浮层显隐)
+    lv_obj_t *info_card;                    // 结算页卡片(GAME OVER + 总分 + 榜单)
     lv_obj_t *lbl_ov_sub;                   // 5 槽榜单(规格 §5.1)
-    lv_obj_t *lbl_ov_hint;                  // 操作提示行(仅标题页)
-    lv_obj_t *lbl_blink;                    // PRESS OK / NEW HIGH SCORE 闪烁行
-    lv_obj_t *pause_card;                   // 暂停菜单卡片(金色边框明显区分)
-    lv_obj_t *lbl_pause_item[3];
+    lv_obj_t *lbl_ov_hint;                  // 结算页本局总分行
+    lv_obj_t *lbl_blink;                    // PRESS ANY KEY / NEW HIGH SCORE 闪烁行
+    lv_obj_t *menu_card;                    // 主菜单卡片(标题 + 4 菜单项)
+    lv_obj_t *lbl_menu_item[PB_MENU_ROWS];  // START/HOW TO PLAY/SETTINGS/HIGH SCORES
+    lv_obj_t *hs_card;                      // 排行榜卡片
+    lv_obj_t *lbl_hs_table;                 // 5 槽榜单
+    lv_obj_t *pause_card;                   // 暂停菜单卡片
+    lv_obj_t *lbl_pause_item[4];            // RESUME/RESTART/EXIT/SETTINGS
+    lv_obj_t *settings_card;                // 设置页卡片
+    lv_obj_t *lbl_set_row[PB_SET_ROWS];     // 可选行:VOL/BLU/BACK
+    lv_obj_t *lbl_set_batt;                 // 电量行(只读,不可选)
+    lv_obj_t *lbl_set_hint;                 // 设置页底部操作提示行
+    lv_obj_t *guide_card;                   // 玩法图鉴卡片(图形化规则,3 页)
+    lv_obj_t *lbl_guide_page;               // 页码指示 "1/3"
+    lv_obj_t *guide_page[PB_GUIDE_PAGES];   // 每页一个容器,按页码显隐
     lv_obj_t *ring_lamp[PB_RING_COUNT];     // outer_circle 点亮态(军衔进度)
     lv_obj_t *upg_lamp[PB_UPG_COUNT];       // bmpr_inc_lights 点亮态(bumper 升级)
     lv_obj_t *star_lamp[PB_STAR_COUNT];     // 右道星标点亮态
@@ -77,6 +88,13 @@ typedef struct {
     int      last_plunger_h;
     pb_state_t last_state;
     uint8_t  last_pause_sel;
+    uint8_t  last_menu_sel;
+    uint8_t  last_guide_page;
+    uint8_t  last_set_sel;
+    uint8_t  last_set_edit;
+    uint8_t  last_set_vol, last_set_blu;
+    int      last_set_batt;
+    int      last_batt;
     uint8_t  last_blink;
     uint8_t  last_hole_frame;
     bool     last_pop_on[PB_POPUPS];
@@ -142,9 +160,284 @@ static lv_obj_t *mk_lamp(lv_obj_t *parent, int cx, int cy, int d, uint32_t color
 
 // ---- 构建 ----
 
+// ---- 系统 UI 设计规范(街机 HUD 风,全部浮层卡片唯一真源)----
+// 字号梯度(受 sdkconfig 限制只有 14/16/20 三档,恰好对应三级层级):
+//   F_TITLE 20 = 卡片主标题 / F_BODY 16 = 菜单项与正文 / F_SMALL 14 = 提示、数值、次级信息
+// 颜色一律取 UI_* 令牌(值复用台面既有 C_SCORE/C_MSG/C_TEXT),禁止就地写 hex。
+#define F_TITLE      (&lv_font_montserrat_20)
+#define F_BODY       (&lv_font_montserrat_16)
+#define F_SMALL      (&lv_font_montserrat_14)
+#define UI_GOLD      C_SCORE     // 主标题 / 选中高亮底 / 分值
+#define UI_CYAN      C_MSG       // 功能页标题(设置/图鉴)/ 页码
+#define UI_TEXT      0xdde8f5    // 正文
+#define UI_DIM       0x8a97ab    // 底部提示 / 次级信息
+#define UI_SEL_FG    0x0b111e    // 选中行文字(深底配金)
+#define UI_PANEL_BG  0x0b111e    // 卡片底
+#define UI_LINE      0x3d5170    // 卡片边框 / 阶梯连线
+#define UI_DIVIDER   0x22304a    // 标题下分隔线
+
+// 卡片几何:统一 216x236 居中,同一垂直节奏——
+//   标题 y10(高24) → 分隔线 y38 → 内容区 46..210 → 提示行贴底 -8
+//   可选行 30px 高,行距 36;行宽 190 居中,圆角 6,垂直居中靠 pad_top 补差。
+#define CARD_W       216
+#define CARD_H       236
+#define CARD_PAD     14          // 卡片内容左右内边距(内容宽 188)
+#define CARD_ROW_W   190
+#define CARD_ROW_H   30
+#define CARD_ROW_PITCH 36        // 可选行起点 y=46,依次 +36
+#define CARD_TITLE_Y 10
+#define CARD_DIV_Y   38
+#define CARD_HINT_DY 8           // 提示行距卡片底边
+
+// 卡片显隐统一入口(本工程 LVGL 版本无 lv_obj_set_hidden)。
+static void card_show(lv_obj_t *c, bool on) {
+    if (on) lv_obj_clear_flag(c, LV_OBJ_FLAG_HIDDEN);
+    else    lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN);
+}
+
+// 统一面板卡片:全部系统页共用尺寸/圆角/底色/边框。
+static lv_obj_t *mk_panel(lv_obj_t *parent) {
+    lv_obj_t *c = lv_obj_create(parent);
+    lv_obj_remove_style_all(c);
+    lv_obj_set_size(c, CARD_W, CARD_H);
+    lv_obj_align(c, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(c, lv_color_hex(UI_PANEL_BG), 0);
+    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(c, lv_color_hex(UI_LINE), 0);
+    lv_obj_set_style_border_width(c, 1, 0);
+    lv_obj_set_style_radius(c, 10, 0);
+    return c;
+}
+
+// 卡片主标题:20 号居中,颜色按页种区分(金=游戏系 / 青=系统系)。
+static lv_obj_t *mk_panel_title(lv_obj_t *card, const char *txt, uint32_t color) {
+    lv_obj_t *t = lv_label_create(card);
+    lv_obj_set_width(t, CARD_W - 2 * CARD_PAD);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, CARD_TITLE_Y);
+    lv_obj_set_style_text_color(t, lv_color_hex(color), 0);
+    lv_obj_set_style_text_font(t, F_TITLE, 0);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(t, txt);
+    return t;
+}
+
+// 标题下分隔线:统一 y=38,宽 = 内容宽。
+static void mk_panel_divider(lv_obj_t *card) {
+    lv_obj_t *d = lv_obj_create(card);
+    lv_obj_remove_style_all(d);
+    lv_obj_set_size(d, CARD_W - 2 * CARD_PAD, 1);
+    lv_obj_align(d, LV_ALIGN_TOP_MID, 0, CARD_DIV_Y);
+    lv_obj_set_style_bg_color(d, lv_color_hex(UI_DIVIDER), 0);
+    lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+}
+
+// 底部操作提示:14 号弱化色,固定贴卡片底边(全页同基线)。
+// 宽度取 LV_SIZE_CONTENT:提示行永远保持单行——固定宽度下最长文案(如设置页
+// "UP/DOWN: SELECT   OK: EDIT")会换行并向上生长,压到上一行(BACK)。单行不向上扩展。
+static lv_obj_t *mk_panel_hint(lv_obj_t *card, const char *txt) {
+    lv_obj_t *h = lv_label_create(card);
+    lv_obj_set_width(h, LV_SIZE_CONTENT);            // 自动宽度→恒定单行,不会换行上生长
+    lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -CARD_HINT_DY);
+    lv_obj_set_style_text_color(h, lv_color_hex(UI_DIM), 0);
+    lv_obj_set_style_text_font(h, F_SMALL, 0);
+    lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(h, txt);
+    return h;
+}
+
+// 可选行(主菜单/暂停/设置共用):16 号居中,190x30 圆角 6,
+// 选中态由 sync 统一刷成金底黑字。pad 6 = (30 - 字高~17)/2,保证垂直居中。
+static lv_obj_t *mk_sel_row(lv_obj_t *card, int y) {
+    lv_obj_t *it = lv_label_create(card);
+    lv_obj_set_size(it, CARD_ROW_W, CARD_ROW_H);
+    lv_obj_align(it, LV_ALIGN_TOP_MID, 0, y);
+    lv_obj_set_style_text_align(it, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(it, F_BODY, 0);
+    lv_obj_set_style_radius(it, 6, 0);
+    lv_obj_set_style_bg_color(it, lv_color_hex(UI_GOLD), 0);
+    lv_obj_set_style_pad_top(it, 6, 0);
+    lv_obj_set_style_pad_bottom(it, 0, 0);
+    return it;
+}
+
+// 选中态刷色(主菜单/暂停/设置三处共用同一高亮样式)。
+static void sel_row_style(lv_obj_t *it, bool sel) {
+    lv_obj_set_style_bg_opa(it, sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(it,
+        lv_color_hex(sel ? UI_SEL_FG : UI_TEXT), 0);
+}
+
+// ---- 玩法图鉴:图形化规则页(色块/阶梯/键位图,不堆文字) ----
+
+// 小色块图标。颜色代表台面元素身份(图例专用,非 UI 框架色)。
+static lv_obj_t *guide_swatch(lv_obj_t *page, int x, int y, int d, uint32_t color, bool circle) {
+    lv_obj_t *o = lv_obj_create(page);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, d, d);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_style_radius(o, circle ? LV_RADIUS_CIRCLE : 3, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    return o;
+}
+
+// 图鉴页内小标题(青色 16 号,位于分隔线下方 y=44)。
+static void guide_subtitle(lv_obj_t *page, const char *txt) {
+    lv_obj_t *t = lv_label_create(page);
+    lv_obj_set_width(t, CARD_W - 2 * CARD_PAD);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_set_style_text_color(t, lv_color_hex(UI_CYAN), 0);
+    lv_obj_set_style_text_font(t, F_BODY, 0);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(t, txt);
+}
+
+// 得分表一行:左色块 + 元素名(14 正文,固定列宽不越界)+ 右对齐分值(14 金)。
+// 名字/分值各占固定列,靠长模式 CLIP 兜底,保证任何文案都不横向重叠。
+#define GUIDE_VAL_X  132   // 分值列左边界(右对齐到内容右边)
+static void guide_score_row(lv_obj_t *page, int y, uint32_t color, bool circle,
+                            const char *name, const char *val) {
+    guide_swatch(page, CARD_PAD, y + 3, 11, color, circle);
+    lv_obj_t *n = lv_label_create(page);
+    lv_obj_set_pos(n, CARD_PAD + 18, y);
+    lv_obj_set_width(n, GUIDE_VAL_X - 6 - (CARD_PAD + 18));   // 名字列固定宽
+    lv_label_set_long_mode(n, LV_LABEL_LONG_CLIP);            // 超长裁切,绝不压到分值
+    lv_obj_set_style_text_color(n, lv_color_hex(UI_TEXT), 0);
+    lv_obj_set_style_text_font(n, F_SMALL, 0);
+    lv_label_set_text(n, name);
+    lv_obj_t *v = lv_label_create(page);
+    lv_obj_set_pos(v, GUIDE_VAL_X, y);
+    lv_obj_set_width(v, CARD_W - CARD_PAD - GUIDE_VAL_X);
+    lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(v, lv_color_hex(UI_GOLD), 0);
+    lv_obj_set_style_text_font(v, F_SMALL, 0);
+    lv_label_set_text(v, val);
+}
+
+// 升级阶梯:标题 + 连线串 n 个节点,每节点下标数值。内容宽内均分。
+static void guide_ladder(lv_obj_t *page, int y, const char *title,
+                         const char *const *nodes, int n, uint32_t color) {
+    lv_obj_t *t = lv_label_create(page);
+    lv_obj_set_pos(t, CARD_PAD, y);
+    lv_obj_set_style_text_color(t, lv_color_hex(UI_TEXT), 0);
+    lv_obj_set_style_text_font(t, F_SMALL, 0);
+    lv_label_set_text(t, title);
+
+    int first_cx = CARD_PAD + 16, last_cx = CARD_W - CARD_PAD - 16;
+    int span = n > 1 ? (last_cx - first_cx) / (n - 1) : 0;
+    int cy = y + 20;                              // 节点圆心行
+    lv_obj_t *line = lv_obj_create(page);
+    lv_obj_remove_style_all(line);
+    lv_obj_set_size(line, last_cx - first_cx, 2);
+    lv_obj_set_pos(line, first_cx, cy - 1);
+    lv_obj_set_style_bg_color(line, lv_color_hex(UI_LINE), 0);
+    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+    for (int i = 0; i < n; i++) {
+        int cx = first_cx + span * i;
+        guide_swatch(page, cx - 5, cy - 5, 10, color, true);
+        lv_obj_t *lb = lv_label_create(page);
+        lv_obj_set_width(lb, 44);
+        lv_obj_set_style_text_align(lb, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(lb, lv_color_hex(UI_GOLD), 0);
+        lv_obj_set_style_text_font(lb, F_SMALL, 0);
+        lv_obj_set_pos(lb, cx - 22, cy + 7);
+        lv_label_set_text(lb, nodes[i]);
+    }
+}
+
+// 键位图一行:键名徽标(描边方块) + 箭头 + 作用文字。
+static void guide_key_row(lv_obj_t *page, int y, const char *key, const char *desc) {
+    lv_obj_t *chip = lv_obj_create(page);
+    lv_obj_remove_style_all(chip);
+    lv_obj_set_size(chip, 64, 20);
+    lv_obj_set_pos(chip, CARD_PAD, y);
+    lv_obj_set_style_radius(chip, 4, 0);
+    lv_obj_set_style_border_color(chip, lv_color_hex(UI_GOLD), 0);
+    lv_obj_set_style_border_width(chip, 1, 0);
+    lv_obj_set_style_bg_color(chip, lv_color_hex(UI_PANEL_BG), 0);
+    lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
+    lv_obj_t *kt = lv_label_create(chip);
+    lv_obj_center(kt);
+    lv_obj_set_style_text_color(kt, lv_color_hex(UI_GOLD), 0);
+    lv_obj_set_style_text_font(kt, F_SMALL, 0);
+    lv_label_set_text(kt, key);
+
+    lv_obj_t *ar = lv_label_create(page);
+    lv_obj_set_pos(ar, CARD_PAD + 70, y + 2);
+    lv_obj_set_style_text_color(ar, lv_color_hex(UI_DIM), 0);
+    lv_obj_set_style_text_font(ar, F_SMALL, 0);
+    lv_label_set_text(ar, "\u2192");            // →
+
+    lv_obj_t *d = lv_label_create(page);
+    lv_obj_set_pos(d, CARD_PAD + 86, y + 2);
+    lv_obj_set_style_text_color(d, lv_color_hex(UI_TEXT), 0);
+    lv_obj_set_style_text_font(d, F_SMALL, 0);
+    lv_label_set_text(d, desc);
+}
+
+static lv_obj_t *guide_make_page(lv_obj_t *card) {
+    lv_obj_t *pg = lv_obj_create(card);
+    lv_obj_remove_style_all(pg);
+    lv_obj_set_size(pg, CARD_W, CARD_H);
+    lv_obj_set_pos(pg, 0, 0);
+    lv_obj_clear_flag(pg, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(pg, LV_OBJ_FLAG_HIDDEN);
+    return pg;
+}
+
+static void build_guide(lv_obj_t *parent) {
+    R.guide_card = mk_panel(parent);
+    mk_panel_title(R.guide_card, "HOW TO PLAY", UI_GOLD);
+    mk_panel_divider(R.guide_card);
+    mk_panel_hint(R.guide_card, "LEFT/RIGHT: PAGE   OK: BACK");
+
+    // 页码角标(右上,14 青):下移到副标题同一行,不再与主标题"HOW TO PLAY"挤同一行。
+    R.lbl_guide_page = lv_label_create(R.guide_card);
+    lv_obj_align(R.lbl_guide_page, LV_ALIGN_TOP_RIGHT, -CARD_PAD, CARD_DIV_Y + 6);
+    lv_obj_set_style_text_color(R.lbl_guide_page, lv_color_hex(UI_CYAN), 0);
+    lv_obj_set_style_text_font(R.lbl_guide_page, F_SMALL, 0);
+    lv_label_set_text(R.lbl_guide_page, "1/3");
+
+    // 页 0:得分表(分值镜像 pb_game.c 的 §2 表;行高 24 从 y=64 起)
+    lv_obj_t *p0 = guide_make_page(R.guide_card);
+    R.guide_page[0] = p0;
+    guide_subtitle(p0, "SCORING");
+    guide_score_row(p0, 64,  0xffd24a, true,  "BUMPERS",      "500-2000");
+    guide_score_row(p0, 88,  0x7fd4ff, false, "LANES",        "2,000");
+    guide_score_row(p0, 112, 0xff6b6b, false, "TARGETS",      "500 / 1500");
+    guide_score_row(p0, 136, 0xb07bff, true,  "BLACK HOLE",   "20,000");
+    guide_score_row(p0, 160, 0x4fd6ff, true,  "GRAVITY WELL", "50,000");
+    guide_score_row(p0, 184, 0x6dffb0, false, "HYPERSPACE",   "10K-150K");
+
+    // 页 1:升级阶梯(bumper 档 + 倍率档)
+    lv_obj_t *p1 = guide_make_page(R.guide_card);
+    R.guide_page[1] = p1;
+    guide_subtitle(p1, "UPGRADES");
+    static const char *const bump_nodes[4] = { "500", "1K", "1.5K", "2K" };
+    static const char *const mult_nodes[5] = { "x1", "x2", "x3", "x5", "x10" };
+    guide_ladder(p1, 64, "ATTACK BUMPERS", bump_nodes, 4, 0xffd24a);
+    guide_ladder(p1, 130, "MULTIPLIER", mult_nodes, 5, 0x7fd4ff);
+
+    // 页 2:键位与目标
+    lv_obj_t *p2 = guide_make_page(R.guide_card);
+    R.guide_page[2] = p2;
+    guide_subtitle(p2, "CONTROLS");
+    guide_key_row(p2, 64,  "UP",      "LEFT FLIPPER");
+    guide_key_row(p2, 90,  "DOWN",    "RIGHT FLIPPER");
+    guide_key_row(p2, 116, "OK",      "LAUNCH / CHARGE");
+    guide_key_row(p2, 142, "HOLD OK", "PAUSE MENU");
+    lv_obj_t *note = lv_label_create(p2);
+    lv_obj_set_width(note, CARD_W - 2 * CARD_PAD);
+    lv_obj_align(note, LV_ALIGN_TOP_MID, 0, 170);
+    lv_obj_set_style_text_color(note, lv_color_hex(UI_DIM), 0);
+    lv_obj_set_style_text_font(note, F_SMALL, 0);
+    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(note, "LIT LANES + TARGETS UPGRADE");
+}
+
 static void build_overlay(lv_obj_t *parent) {
     // 浮层只盖台面,不盖顶部记分板:暂停/结算时当前分数、球数、倍率仍然可见。
-    // 之前整屏半透明层把记分板糊成一片,是"层级不清"的主因(差距清单 C1)。
     R.overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(R.overlay);
     lv_obj_set_size(R.overlay, PB_SCREEN_W, PB_SCREEN_H - PB_STATUS_H);
@@ -152,104 +445,92 @@ static void build_overlay(lv_obj_t *parent) {
     lv_obj_set_style_bg_color(R.overlay, lv_color_hex(0x04060c), 0);
     lv_obj_set_style_bg_opa(R.overlay, LV_OPA_90, 0);
 
-    // 中央不透明卡片:完全压住背后的台面花纹,文字才有对比度。
-    // 高度按"标题 20 号 + 提示行 + 5 行榜单 + 闪烁行"逐段预算,互不重叠。
-    lv_obj_t *card = lv_obj_create(R.overlay);
-    R.info_card = card;
-    lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, 216, 186);
-    lv_obj_align(card, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(card, lv_color_hex(0x0b111e), 0);
-    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(card, lv_color_hex(0x3d5170), 0);
-    lv_obj_set_style_border_width(card, 1, 0);
-    lv_obj_set_style_radius(card, 8, 0);
+    // 右上角电量角标:overlay 子,最后创建保证置顶;卡片居中下移,不重叠。
+    R.lbl_batt = lv_label_create(R.overlay);
+    lv_obj_set_style_text_color(R.lbl_batt, lv_color_hex(UI_DIM), 0);
+    lv_obj_set_style_text_font(R.lbl_batt, F_SMALL, 0);
+    lv_obj_align(R.lbl_batt, LV_ALIGN_TOP_RIGHT, -6, 4);
+    lv_label_set_text(R.lbl_batt, "");
 
-    R.lbl_ov_title = lv_label_create(card);
-    lv_obj_set_width(R.lbl_ov_title, 200);                  // 限宽换行,不溢出卡片
-    lv_label_set_long_mode(R.lbl_ov_title, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_color(R.lbl_ov_title, lv_color_hex(C_SCORE), 0);
-    lv_obj_set_style_text_font(R.lbl_ov_title, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_align(R.lbl_ov_title, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(R.lbl_ov_title, LV_ALIGN_TOP_MID, 0, 6);    // 6..34
+    // 可选行统一垂直节奏:起 y=46,行距 CARD_ROW_PITCH(36)。
+    // ---- 主菜单卡片:标题 + 4 项(START/HOW TO PLAY/SETTINGS/HIGH SCORES)----
+    R.menu_card = mk_panel(R.overlay);
+    mk_panel_title(R.menu_card, "SPACE PINBALL", UI_GOLD);
+    mk_panel_divider(R.menu_card);
+    for (int i = 0; i < PB_MENU_ROWS; i++)
+        R.lbl_menu_item[i] = mk_sel_row(R.menu_card, 46 + i * CARD_ROW_PITCH);
+    mk_panel_hint(R.menu_card, "UP/DOWN: SELECT   OK: GO");
 
-    // 副标题行:标题页放操作提示(规格 §4 操作方式),结算页放本局总分。
-    // 与榜单同宽同锚点 + 左对齐:卡片内多行文本左缘统一成一条竖线,
-    // 居中会让短行产生行首空白、与左对齐的榜单间距不一致(实机反馈 #1)。
-    R.lbl_ov_hint = lv_label_create(card);
-    lv_obj_set_width(R.lbl_ov_hint, 150);
-    lv_obj_set_style_text_color(R.lbl_ov_hint, lv_color_hex(0x8a97ab), 0);
-    lv_obj_set_style_text_font(R.lbl_ov_hint, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(R.lbl_ov_hint, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_align(R.lbl_ov_hint, LV_ALIGN_TOP_MID, 0, 38);    // 两行 38..66(标题下留分割线)
+    // ---- 结算卡片(GAME OVER):标题 + 本局总分 + 5 槽榜单 + 闪烁行 ----
+    R.info_card = mk_panel(R.overlay);
+    mk_panel_title(R.info_card, "GAME OVER", UI_GOLD);
+    mk_panel_divider(R.info_card);
 
-    // UI 盘点 #3:标题与提示、提示与榜单之间各一道细分割线,视觉分组
-    static const uint32_t DIV_COL = 0x2a4a7a;
-    for (int i = 0; i < 2; i++) {
-        lv_obj_t *div = lv_obj_create(card);
-        lv_obj_remove_style_all(div);
-        lv_obj_set_size(div, 190, 1);
-        lv_obj_align(div, LV_ALIGN_TOP_MID, 0, i == 0 ? 36 : 68);
-        lv_obj_set_style_bg_color(div, lv_color_hex(DIV_COL), 0);
-        lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
-    }
+    R.lbl_ov_hint = lv_label_create(R.info_card);            // 本局总分
+    lv_obj_set_width(R.lbl_ov_hint, CARD_W - 2 * CARD_PAD);
+    lv_obj_align(R.lbl_ov_hint, LV_ALIGN_TOP_MID, 0, 46);
+    lv_obj_set_style_text_color(R.lbl_ov_hint, lv_color_hex(UI_GOLD), 0);
+    lv_obj_set_style_text_font(R.lbl_ov_hint, F_BODY, 0);
+    lv_obj_set_style_text_align(R.lbl_ov_hint, LV_TEXT_ALIGN_CENTER, 0);
 
-    // 5 槽榜单(规格 §5.1):左对齐成表,数字用 %7ld 右靠齐(等宽数字)。
-    R.lbl_ov_sub = lv_label_create(card);
-    lv_obj_set_size(R.lbl_ov_sub, 150, 80);
-    lv_obj_set_style_text_color(R.lbl_ov_sub, lv_color_hex(0xdde8f5), 0);
-    lv_obj_set_style_text_font(R.lbl_ov_sub, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(R.lbl_ov_sub, LV_TEXT_ALIGN_LEFT, 0);
+    R.lbl_ov_sub = lv_label_create(R.info_card);             // 5 槽榜单
+    lv_obj_set_size(R.lbl_ov_sub, CARD_W - 2 * CARD_PAD, 90);
+    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_TOP_MID, 0, 74);
+    lv_obj_set_style_text_color(R.lbl_ov_sub, lv_color_hex(UI_TEXT), 0);
+    lv_obj_set_style_text_font(R.lbl_ov_sub, F_SMALL, 0);
+    lv_obj_set_style_text_align(R.lbl_ov_sub, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_pad_all(R.lbl_ov_sub, 0, 0);
-    lv_obj_align(R.lbl_ov_sub, LV_ALIGN_TOP_MID, 0, 74);     // 74..154
 
-    // 底部闪烁行:标题页 PRESS OK / 结算页新纪录提示
-    R.lbl_blink = lv_label_create(card);
-    lv_obj_set_width(R.lbl_blink, 200);
-    lv_obj_set_style_text_font(R.lbl_blink, &lv_font_montserrat_14, 0);
+    R.lbl_blink = lv_label_create(R.info_card);              // PRESS ANY KEY / NEW HIGH SCORE
+    lv_obj_set_width(R.lbl_blink, CARD_W - 2 * CARD_PAD);
+    lv_obj_align(R.lbl_blink, LV_ALIGN_BOTTOM_MID, 0, -CARD_HINT_DY);
+    lv_obj_set_style_text_font(R.lbl_blink, F_SMALL, 0);
     lv_obj_set_style_text_align(R.lbl_blink, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(R.lbl_blink, LV_ALIGN_BOTTOM_MID, 0, -6);   // 底部安全边距(UI 盘点 #3)
     lv_obj_add_flag(R.lbl_blink, LV_OBJ_FLAG_HIDDEN);
 
-    // 暂停菜单卡片:金色边框 + 大字选项,与台面小字/信息卡片明显区分。
-    lv_obj_t *pc = lv_obj_create(R.overlay);
-    R.pause_card = pc;
-    lv_obj_remove_style_all(pc);
-    lv_obj_set_size(pc, 216, 170);
-    lv_obj_align(pc, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_clear_flag(pc, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(pc, lv_color_hex(0x0d1020), 0);
-    lv_obj_set_style_bg_opa(pc, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(pc, lv_color_hex(C_SCORE), 0);
-    lv_obj_set_style_border_width(pc, 2, 0);
-    lv_obj_set_style_radius(pc, 10, 0);
+    // ---- 排行榜卡片:标题 + 5 槽榜单 + 提示 ----
+    R.hs_card = mk_panel(R.overlay);
+    mk_panel_title(R.hs_card, "HIGH SCORES", UI_GOLD);
+    mk_panel_divider(R.hs_card);
+    R.lbl_hs_table = lv_label_create(R.hs_card);
+    lv_obj_set_size(R.lbl_hs_table, CARD_W - 2 * CARD_PAD, 100);
+    lv_obj_align(R.lbl_hs_table, LV_ALIGN_TOP_MID, 0, 50);
+    lv_obj_set_style_text_color(R.lbl_hs_table, lv_color_hex(UI_TEXT), 0);
+    lv_obj_set_style_text_font(R.lbl_hs_table, F_SMALL, 0);
+    lv_obj_set_style_text_align(R.lbl_hs_table, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_all(R.lbl_hs_table, 0, 0);
+    mk_panel_hint(R.hs_card, "OK: BACK");
 
-    lv_obj_t *ttl = lv_label_create(pc);
-    lv_obj_set_style_text_color(ttl, lv_color_hex(C_SCORE), 0);
-    lv_obj_set_style_text_font(ttl, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_align(ttl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(ttl, LV_ALIGN_TOP_MID, 0, 10);
-    lv_label_set_text(ttl, "PAUSED");
+    // ---- 暂停菜单卡片:标题 + 4 项(RESUME/RESTART/EXIT/SETTINGS)----
+    R.pause_card = mk_panel(R.overlay);
+    mk_panel_title(R.pause_card, "PAUSED", UI_GOLD);
+    mk_panel_divider(R.pause_card);
+    for (int i = 0; i < 4; i++)
+        R.lbl_pause_item[i] = mk_sel_row(R.pause_card, 46 + i * CARD_ROW_PITCH);
+    mk_panel_hint(R.pause_card, "UP/DOWN: SELECT   OK: GO");
 
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *it = lv_label_create(pc);
-        lv_obj_set_size(it, 170, 28);
-        lv_obj_align(it, LV_ALIGN_TOP_MID, 0, 44 + i * 32);
-        lv_obj_set_style_text_align(it, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_text_font(it, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_radius(it, 5, 0);
-        lv_obj_set_style_bg_color(it, lv_color_hex(C_SCORE), 0);
-        lv_obj_set_style_pad_top(it, 5, 0);
-        R.lbl_pause_item[i] = it;
-    }
+    // ---- 设置页卡片:标题 + 音量/背光两可选行 + 电量只读行 + 返回行 ----
+    // 四个行槽位等间距(间距 38,行高 30→间隙 8px,不再贴挤):
+    //   VOL(46) / BLU(84) / BATTERY(122 只读) / BACK(160)。
+    R.settings_card = mk_panel(R.overlay);
+    mk_panel_title(R.settings_card, "SETTINGS", UI_GOLD);
+    mk_panel_divider(R.settings_card);
+    static const int SET_ROW_Y[PB_SET_ROWS] = { 46, 84, 160 };
+    for (int i = 0; i < PB_SET_ROWS; i++)
+        R.lbl_set_row[i] = mk_sel_row(R.settings_card, SET_ROW_Y[i]);
 
-    lv_obj_t *hint = lv_label_create(pc);
-    lv_obj_set_style_text_color(hint, lv_color_hex(0x8a97ab), 0);
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
-    lv_label_set_text(hint, "UP/DOWN: SELECT  OK: GO");
+    R.lbl_set_batt = lv_label_create(R.settings_card);       // 只读,弱化小字
+    lv_obj_set_size(R.lbl_set_batt, CARD_ROW_W, CARD_ROW_H);
+    lv_obj_align(R.lbl_set_batt, LV_ALIGN_TOP_MID, 0, 122);
+    lv_obj_set_style_text_align(R.lbl_set_batt, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(R.lbl_set_batt, F_SMALL, 0);
+    lv_obj_set_style_text_color(R.lbl_set_batt, lv_color_hex(UI_DIM), 0);
+    lv_obj_set_style_pad_top(R.lbl_set_batt, 8, 0);
+
+    R.lbl_set_hint = mk_panel_hint(R.settings_card, "UP/DOWN: SELECT   OK: EDIT");
+
+    // ---- 玩法图鉴卡片(3 页图形化规则)----
+    build_guide(R.overlay);
 }
 
 void pb_render_build(pb_game *g, lv_obj_t *parent) {
@@ -439,7 +720,10 @@ void pb_render_sync(pb_game *g) {
     }
     if (force || g->ball_num != R.last_ball) {
         R.last_ball = g->ball_num;
-        lv_label_set_text_fmt(R.lbl_ball, "BALL %d/%d", g->ball_num, PB_BALLS_TOTAL);
+        // 开局前(主菜单/图鉴等 HUD 常驻可见)ball_num=0,不防 HUD 会显示“BALL 0/3”;
+        // 无局时默认展示第一球。真实局内 ball_num 从 1 起(新局/球耗尽递增),不影响。
+        lv_label_set_text_fmt(R.lbl_ball, "BALL %d/%d",
+                              g->ball_num ? g->ball_num : 1, PB_BALLS_TOTAL);
     }
     if (force || g->mult_idx != R.last_mult_idx) {
         R.last_mult_idx = g->mult_idx;
@@ -595,76 +879,144 @@ void pb_render_sync(pb_game *g) {
         }
     }
 
-    // 标题/结算/暂停浮层:状态切换时重建文本
+    // 浮层六张卡片:主菜单(标题)/结算/暂停/设置/排行榜/图鉴,按状态显隐。
     if (force || g->state != R.last_state) {
         R.last_state = g->state;
         R.last_blink = 0xFF;                    // 闪烁行强制按新状态重建
-        bool show_info = (g->state == PB_STATE_TITLE || g->state == PB_STATE_OVER);
+        bool show_menu  = (g->state == PB_STATE_TITLE);
+        bool show_over  = (g->state == PB_STATE_OVER);
+        bool show_hs    = (g->state == PB_STATE_HS);
         bool show_pause = (g->state == PB_STATE_PAUSE);
-        if (show_info || show_pause) {
+        bool show_set   = (g->state == PB_STATE_SETTINGS);
+        bool show_guide = (g->state == PB_STATE_GUIDE);
+        if (show_menu || show_over || show_hs || show_pause || show_set || show_guide) {
             lv_obj_clear_flag(R.overlay, LV_OBJ_FLAG_HIDDEN);
-            if (show_info) {
+            card_show(R.menu_card, show_menu);
+            card_show(R.info_card, show_over);
+            card_show(R.hs_card, show_hs);
+            card_show(R.pause_card, show_pause);
+            card_show(R.settings_card, show_set);
+            card_show(R.guide_card, show_guide);
+            // 电量角标:设置页自带 BATTERY 行,隐藏右上角角标避免重复显示/贴挤。
+            if (show_set) lv_obj_add_flag(R.lbl_batt, LV_OBJ_FLAG_HIDDEN);
+            else          lv_obj_clear_flag(R.lbl_batt, LV_OBJ_FLAG_HIDDEN);
+            if (show_over) {
                 char tbl[80];
-                lv_obj_clear_flag(R.info_card, LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(R.pause_card, LV_OBJ_FLAG_HIDDEN);
                 fmt_hs_table(g, tbl, sizeof tbl);
                 lv_label_set_text(R.lbl_ov_sub, tbl);
-                lv_obj_clear_flag(R.lbl_ov_hint, LV_OBJ_FLAG_HIDDEN);
-                if (g->state == PB_STATE_TITLE) {
-                    lv_label_set_text(R.lbl_ov_title, "SPACE PINBALL");
-                    lv_label_set_text(R.lbl_ov_hint, "UP/DOWN: FLIP\nOK: LAUNCH");
-                    lv_obj_set_style_text_color(R.lbl_ov_hint,
-                                                lv_color_hex(0x8a97ab), 0);
-                } else {
-                    // 总分放在榜单上方的固定行;当前分数/倍率/球数在顶部记分板
-                    // 仍然可见(浮层不再遮盖),所以这里不重复 HIGH 行。
-                    lv_label_set_text(R.lbl_ov_title, "GAME OVER");
-                    lv_label_set_text_fmt(R.lbl_ov_hint, "SCORE %lu",
-                                          (unsigned long)g->score);
-                    lv_obj_set_style_text_color(R.lbl_ov_hint,
-                                                lv_color_hex(C_SCORE), 0);
-                }
-            } else {
-                // 暂停卡片金色边框 + 大字菜单,和台面/信息卡片一眼区分
-                lv_obj_add_flag(R.info_card, LV_OBJ_FLAG_HIDDEN);
-                lv_obj_clear_flag(R.pause_card, LV_OBJ_FLAG_HIDDEN);
+                lv_label_set_text_fmt(R.lbl_ov_hint, "SCORE %lu",
+                                      (unsigned long)g->score);
             }
+            if (show_hs) {
+                char tbl[80];
+                fmt_hs_table(g, tbl, sizeof tbl);
+                lv_label_set_text(R.lbl_hs_table, tbl);
+            }
+            if (show_menu) R.last_menu_sel = 0xFF;   // 强制重建主菜单高亮
+            if (show_set)  R.last_set_sel  = 0xFF;   // 强制重建设置行
+            if (show_guide) R.last_guide_page = 0xFF; // 强制切换图鉴页
         } else {
             lv_obj_add_flag(R.overlay, LV_OBJ_FLAG_HIDDEN);
         }
-    }
-
-    // 暂停菜单选中项:金底黑字 vs 透明底白字
-    if (force || (g->state == PB_STATE_PAUSE && g->pause_sel != R.last_pause_sel)) {
-        R.last_pause_sel = g->pause_sel;
-        static const char *const items[3] = { "RESUME", "RESTART", "EXIT TO TITLE" };
-        for (int i = 0; i < 3; i++) {
-            lv_obj_t *it = R.lbl_pause_item[i];
-            lv_label_set_text(it, items[i]);
-            bool sel = (i == g->pause_sel);
-            lv_obj_set_style_bg_opa(it, sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-            lv_obj_set_style_text_color(it,
-                lv_color_hex(sel ? 0x10141e : 0xdde8f5), 0);
+        // 菜单类页面(标题/排行榜/设置/图鉴)无进行中对局，隐藏顶部分数/球数/倍率读数；
+        // 暂停与结算仍保留(当前分数有意义)，游戏中(else 分支)自然显示。仅在状态跳变时刷。
+        bool hud_hide = show_menu || show_hs || show_set || show_guide;
+        lv_obj_t *hud[4] = { R.lbl_score, R.lbl_score_sh, R.lbl_ball, R.lbl_mult };
+        for (int i = 0; i < 4; i++) {
+            if (hud_hide) lv_obj_add_flag(hud[i], LV_OBJ_FLAG_HIDDEN);
+            else          lv_obj_clear_flag(hud[i], LV_OBJ_FLAG_HIDDEN);
         }
     }
 
-    // 闪烁行:标题页 PRESS OK / 结算页新纪录
-    if (g->state == PB_STATE_TITLE || g->state == PB_STATE_OVER) {
+    // 右上角电量角标:overlay 子,随浮层一起显隐;电量变化时重写。
+    if (force || g->battery != R.last_batt) {
+        R.last_batt = g->battery;
+        if (g->battery >= 0) lv_label_set_text_fmt(R.lbl_batt, "BAT %d%%", g->battery);
+        else                 lv_label_set_text(R.lbl_batt, "BAT --");
+    }
+
+    // 主菜单选中项(统一高亮样式)。
+    if (g->state == PB_STATE_TITLE &&
+        (force || g->menu_sel != R.last_menu_sel)) {
+        R.last_menu_sel = g->menu_sel;
+        static const char *const mitems[PB_MENU_ROWS] = { "START", "HOW TO PLAY", "SETTINGS", "HIGH SCORES" };
+        for (int i = 0; i < PB_MENU_ROWS; i++) {
+            lv_obj_t *it = R.lbl_menu_item[i];
+            lv_label_set_text(it, mitems[i]);
+            sel_row_style(it, i == g->menu_sel);
+        }
+    }
+
+    // 暂停菜单选中项(4 项,同一高亮样式)。
+    if (force || (g->state == PB_STATE_PAUSE && g->pause_sel != R.last_pause_sel)) {
+        R.last_pause_sel = g->pause_sel;
+        static const char *const items[4] = { "RESUME", "RESTART", "EXIT TO TITLE", "SETTINGS" };
+        for (int i = 0; i < 4; i++) {
+            lv_obj_t *it = R.lbl_pause_item[i];
+            lv_label_set_text(it, items[i]);
+            sel_row_style(it, i == g->pause_sel);
+        }
+    }
+
+    // 设置页:选中/编辑态/数值/电量任一变化时重建三行 + 电量行。
+    // 调节态把数值用尖括号包起 + 高亮底色,提示此时 UP/DOWN 改的是这一行。
+    if (g->state == PB_STATE_SETTINGS &&
+        (force || g->set_sel != R.last_set_sel || g->set_edit != R.last_set_edit ||
+         g->vol != R.last_set_vol || g->blu != R.last_set_blu ||
+         g->battery != R.last_set_batt)) {
+        R.last_set_sel = g->set_sel;
+        R.last_set_edit = g->set_edit;
+        R.last_set_vol = g->vol;
+        R.last_set_blu = g->blu;
+        R.last_set_batt = g->battery;
+        for (int i = 0; i < PB_SET_ROWS; i++) {
+            lv_obj_t *it = R.lbl_set_row[i];
+            bool sel = (i == g->set_sel);
+            bool editing = sel && g->set_edit;
+            char buf[24];
+            if (i == PB_SET_ROW_VOL)
+                snprintf(buf, sizeof buf, editing ? "VOLUME <%d>" : "VOLUME  %d", g->vol);
+            else if (i == PB_SET_ROW_BLU)
+                snprintf(buf, sizeof buf, editing ? "LIGHT <%d>" : "LIGHT  %d", g->blu);
+            else
+                snprintf(buf, sizeof buf, "BACK");
+            lv_label_set_text(it, buf);
+            // 选中行高亮底(与主菜单/暂停页同一金底黑字样式)。
+            sel_row_style(it, sel);
+        }
+        if (g->battery >= 0)
+            lv_label_set_text_fmt(R.lbl_set_batt, "BATTERY  %d%%", g->battery);
+        else
+            lv_label_set_text(R.lbl_set_batt, "BATTERY  --");
+        lv_label_set_text(R.lbl_set_hint,
+                          g->set_edit ? "UP/DOWN: +/-   OK: DONE"
+                                      : "UP/DOWN: SELECT   OK: EDIT");
+    }
+
+    // 图鉴页切换:只显当前页容器,页码角标同步(内容静态,建卡时已填好)。
+    if (g->state == PB_STATE_GUIDE &&
+        (force || g->guide_page != R.last_guide_page)) {
+        R.last_guide_page = g->guide_page;
+        for (int i = 0; i < PB_GUIDE_PAGES; i++)
+            card_show(R.guide_page[i], i == g->guide_page);
+        lv_label_set_text_fmt(R.lbl_guide_page, "%d/%d",
+                              g->guide_page + 1, PB_GUIDE_PAGES);
+    }
+
+    // 闪烁行:仅结算页(lbl_blink 是 info_card 子,只在 GAME OVER 浮层可见)。
+    // 标题页已改为完整主菜单,自带底部提示,不再用此闪烁行。
+    if (g->state == PB_STATE_OVER) {
         uint8_t blink = (uint8_t)((R.tick / 24) & 1);       // ~0.4s 相位
         if (blink != R.last_blink) {
             R.last_blink = blink;
-            if (g->state == PB_STATE_TITLE) {
-                lv_label_set_text(R.lbl_blink, "PRESS OK TO START");
-                lv_obj_set_style_text_color(R.lbl_blink,
-                    lv_color_hex(blink ? C_SCORE : 0x303a4c), 0);
-            } else if (g->new_high) {
+            if (g->new_high) {
                 lv_label_set_text(R.lbl_blink, "NEW HIGH SCORE!");
                 lv_obj_set_style_text_color(R.lbl_blink,
-                    lv_color_hex(blink ? C_SCORE : 0xf5f5f5), 0);
+                    lv_color_hex(blink ? UI_GOLD : 0xf5f5f5), 0);
             } else {
                 lv_label_set_text(R.lbl_blink, "PRESS ANY KEY");
                 lv_obj_set_style_text_color(R.lbl_blink,
-                    lv_color_hex(blink ? 0xdde8f5 : 0x5a6a84), 0);
+                    lv_color_hex(blink ? UI_TEXT : UI_DIM), 0);
             }
             lv_obj_clear_flag(R.lbl_blink, LV_OBJ_FLAG_HIDDEN);
         }
