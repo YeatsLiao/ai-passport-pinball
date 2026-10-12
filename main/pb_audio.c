@@ -34,6 +34,11 @@ static const snd_def_t SND_DEFS[] = {
     [PB_SND_DRAIN]  = { 300.0f,  70.0f,  400 },   // 掉落:下坠
     [PB_SND_BONUS]  = { 1046.0f, 1568.0f, 180 },  // 奖励:双音上扬
     [PB_SND_OVER]   = { 440.0f,  110.0f, 550 },   // 结束:长下扫
+    // ---- UI 导航反馈(菜单/设置/图鉴)----
+    [PB_SND_UI_MOVE]  = { 520.0f,  480.0f,  28 },   // 移动:短促低"嗒"
+    [PB_SND_UI_OK]    = { 660.0f,  990.0f,  90 },   // 确认:上行"叮呐"
+    [PB_SND_UI_BACK]  = { 880.0f,  440.0f,  90 },   // 返回:下行"呐叮"
+    [PB_SND_UI_TICK]  = { 1200.0f, 1200.0f, 22 },   // 调节:轻快高"嘀"
 };
 
 static QueueHandle_t s_queue;

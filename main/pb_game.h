@@ -27,12 +27,19 @@ typedef enum {
     PB_STATE_DRAIN,     // 掉落过场
     PB_STATE_OVER,      // 结算
     PB_STATE_PAUSE,     // 暂停菜单(长按 OK 呼出,UP/DOWN 选择,OK 确认)
+    PB_STATE_SETTINGS,  // 设置页(音量/亮度调节,电量只读)
+    PB_STATE_HS,        // 排行榜页(主菜单进入,OK 返回)
+    PB_STATE_GUIDE,     // 玩法图鉴(图形化规则:得分表/升级阶梯/机制,左右翻页)
 } pb_state_t;
 
-// 音效事件(实现在 pb_audio.c,设备侧)。
+// 音效事件(实现在 pb_audio.c,设备侧)。UI_* 为菜单导航反馈。
 typedef enum {
     PB_SND_FLIP = 0, PB_SND_BUMP, PB_SND_SLING, PB_SND_TARGET,
     PB_SND_LANE, PB_SND_LAUNCH, PB_SND_DRAIN, PB_SND_BONUS, PB_SND_OVER,
+    PB_SND_UI_MOVE,     // 菜单/选项移动:短促低嗒声
+    PB_SND_UI_OK,       // 确认进入:双音上行
+    PB_SND_UI_BACK,     // 返回/退出:双音下行
+    PB_SND_UI_TICK,     // 设置调节:轻快"嘀"
 } pb_snd_t;
 
 void pb_audio_init(void);
@@ -48,6 +55,25 @@ void pb_audio_play(pb_snd_t snd);
 #define PB_RING_LAMPS PB_RING_COUNT // 规格 §3 outer_circle 段数
 #define PB_HS_SLOTS 5               // 规格 §5.1 最高分槽位数
 #define PB_HS_EMPTY (-999)          // 规格 §5.2 空槽哨兵
+
+// 设置页(音量/亮度)。三档可选行 + 一行只读电量;数值以 10% 步进调节。
+// 背光下限非 0:防止把屏幕调到全黑再也看不见(0=全灭是硬件行为)。
+#define PB_SET_ROW_VOL  0           // 可选行:音量
+#define PB_SET_ROW_BLU  1           // 可选行:背光亮度
+#define PB_SET_ROW_BACK 2           // 可选行:返回
+#define PB_SET_ROWS     3           // 可选行数(电量行只读,不参与选择)
+#define PB_ADJ_STEP     10          // 每次增减的百分比
+#define PB_BLU_MIN      10          // 背光下限
+
+// 主菜单项(标题页):START / HOW TO PLAY / SETTINGS / HIGH SCORES。
+#define PB_MENU_START   0
+#define PB_MENU_GUIDE   1
+#define PB_MENU_SETUP   2
+#define PB_MENU_HS      3
+#define PB_MENU_ROWS    4
+
+// 玩法图鉴页数(得分表 / 升级阶梯 / 机制与操作)。
+#define PB_GUIDE_PAGES  3
 
 // 命中点得分飘字(向上飘 + 渐隐,渲染层读取绘制)。
 #define PB_POPUPS 3
@@ -108,8 +134,22 @@ typedef struct {
 
     // 暂停菜单
     pb_state_t paused_prev;         // 呼出前的状态(RESUME 回去)
-    uint8_t pause_sel;              // 0=RESUME 1=RESTART 2=EXIT
+    uint8_t pause_sel;              // 0=RESUME 1=RESTART 2=EXIT 3=SETTINGS
     bool new_high;                  // 本局刷新纪录(结算页闪烁提示用)
+
+    // 主菜单(标题页)
+    uint8_t menu_sel;               // PB_MENU_START/GUIDE/SETUP/HS
+
+    // 玩法图鉴
+    uint8_t guide_page;             // 当前页 0..PB_GUIDE_PAGES-1
+
+    // 设置页(音量/亮度/电量)
+    pb_state_t set_prev;            // 退出设置回到的状态(TITLE 或 PAUSE)
+    uint8_t set_sel;                // 当前选中行:PB_SET_ROW_*
+    bool set_edit;                  // true=正在调当前行数值(UP/DOWN 增减)
+    uint8_t vol;                    // 音量 0..100(main.c 应用到 codec)
+    uint8_t blu;                    // 背光 0..100(main.c 应用到 LEDC)
+    int battery;                    // 电量百分比,-1=不可用(main.c 轮询写入)
 
     // 输入事件环形队列(按键回调单生产者,游戏步进单消费者)。
     volatile uint8_t ev_head, ev_tail;
@@ -122,6 +162,10 @@ void pb_game_init(pb_game *g);
 void pb_game_nvs_load(pb_game *g);
 // 设备侧:把榜单写回 NVS(规格 §5.5:校验和不匹配时整表清零)。
 void pb_game_nvs_save(pb_game *g);
+// 设备侧:从 NVS 读音量/背光(缺省 70/100,越界钳制)。init 后调用一次。
+void pb_game_settings_load(pb_game *g);
+// 设备侧:把音量/背光写回 NVS(退出编辑或退出设置时调用)。
+void pb_game_settings_save(pb_game *g);
 
 // 按键事件入口(可在任意任务/回调里调用,只入队不干活)。
 void pb_game_key(pb_game *g, pb_key_t key, pb_key_ev_t ev);

@@ -4,6 +4,8 @@
 #include "bsp_display.h"
 #include "bsp_button.h"
 #include "bsp_pins.h"
+#include "bsp_audio.h"
+#include "bsp_battery.h"
 #include "pb_game.h"
 #include "pb_render.h"
 #include "pb_audio.h"
@@ -69,10 +71,34 @@ static void key_poll(void) {
     } else { ok_hold = 0; long_sent = false; }
 }
 
+// 音量/背光变化时才写硬件(避免每帧调 codec/LEDC)。游戏逻辑只改
+// s_game.vol/blu,硬件应用集中在这里,保持 pb_game 不依赖 BSP。
+static void apply_hw(void) {
+    static int last_vol = -1, last_blu = -1;
+    if ((int)s_game.vol != last_vol) {
+        last_vol = s_game.vol;
+        bsp_audio_set_volume(s_game.vol);
+    }
+    if ((int)s_game.blu != last_blu) {
+        last_blu = s_game.blu;
+        bsp_display_backlight(s_game.blu);
+    }
+}
+
+// 电量计走 I2C,不能 60Hz 读;~2s 轮询一次。读失败 soc() 返回 -1(置为不可用)。
+static void poll_battery(void) {
+    static int div = 0;
+    if (++div < 120) return;
+    div = 0;
+    s_game.battery = bsp_battery_soc();
+}
+
 static void game_timer_cb(lv_timer_t *t) {
     (void)t;
     key_poll();
     pb_game_step(&s_game, 0.016f);
+    apply_hw();
+    poll_battery();
     pb_render_sync(&s_game);
 }
 
@@ -97,8 +123,11 @@ void app_main(void) {
 
     pb_game_init(&s_game);
     pb_game_nvs_load(&s_game);
+    pb_game_settings_load(&s_game);                 // 音量/背光(缺省 70/100)
     pb_audio_init();
     bsp_button_init(NULL, NULL);                    // 只要 ADC 句柄与校准,事件走 key_poll
+    bsp_battery_init();                             // 失败则电量显示为不可用(-1)
+    bsp_display_backlight(s_game.blu);              // 用加载值覆盖上面的临时 100%
 
     if (bsp_lvgl_lock(1000)) {
         lv_obj_t *scr = lv_screen_active();

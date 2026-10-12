@@ -16,6 +16,8 @@
 #define NVS_NS     "pinball"
 #define NVS_KEY_HS "hs"       // 旧版单值最高分,只读迁移用
 #define NVS_KEY_TBL "hst"     // 5 槽榜单 blob(§5.1/§5.5)
+#define NVS_KEY_VOL "vol"     // 音量 u8(0..100)
+#define NVS_KEY_BLU "blu"     // 背光 u8(0..100)
 
 // ---- 分值表(§2) ----
 #define SCORE_REBO      500u      // §2.1 rebo3/4 回弹器(本台面的小立柱)
@@ -156,6 +158,29 @@ void pb_game_nvs_save(pb_game *g) {
     nvs_close(h);
 }
 
+// ---- 设置(音量/背光)NVS 持久化 ----
+
+void pb_game_settings_load(pb_game *g) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;   // 无 NS:留默认值
+    uint8_t v;
+    if (nvs_get_u8(h, NVS_KEY_VOL, &v) == ESP_OK && v <= 100) g->vol = v;
+    if (nvs_get_u8(h, NVS_KEY_BLU, &v) == ESP_OK && v <= 100) {
+        if (v < PB_BLU_MIN) v = PB_BLU_MIN;                     // 钳到下限,不致全黑
+        g->blu = v;
+    }
+    nvs_close(h);
+}
+
+void pb_game_settings_save(pb_game *g) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, NVS_KEY_VOL, g->vol);
+    nvs_set_u8(h, NVS_KEY_BLU, g->blu);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
 // ---- 输入事件队列 ----
 
 static void ev_push(pb_game *g, pb_key_t key, pb_key_ev_t ev) {
@@ -238,6 +263,11 @@ void pb_game_init(pb_game *g) {
     g->state = PB_STATE_TITLE;
     g->state_timer = 0;
     g->rank = 1;
+    g->vol = 70;                    // 缺省音量/背光(NVS 有值时 load 覆盖)
+    g->blu = 100;
+    g->battery = -1;                // 未知,main.c 轮询后刷新
+    g->menu_sel = PB_MENU_START;    // 主菜单默认停在 START
+    g->guide_page = 0;              // 图鉴从得分表页开始
     hs_clear(g);
 }
 
@@ -338,7 +368,7 @@ static void on_star(pb_game *g, int idx) {
     for (int i = 0; i < PB_STAR_COUNT; i++) g->star_lit[i] = false;
 }
 
-// §4.3 球保存只在发射瞬间武装、每球一次;用掉即熄灯(原版 Message(20))。
+// 严格 3 颗球:已取消 ball save(RE-DEPLOY),掉一颗就进下一颗,不再免费重投。
 static void on_drain(pb_game *g) {
     pb_ball *b = &g->table.world.ball;
     b->active = false;
@@ -349,16 +379,6 @@ static void on_drain(pb_game *g) {
     g->flash_hole = 0;
     g->lost_time = 0;
     g->bump_prog = 0;                             // §3 掉球清空升级灯组
-    if (g->ball_save > 0) {
-        g->ball_save = 0;
-        g->ball_save_used = true;
-        spawn_ball_in_lane(g);
-        g->state = PB_STATE_LAUNCH;
-        g->state_timer = 0;
-        show_msg(g, "RE-DEPLOY", 2.0f);          // RC 96
-        pb_audio_play(PB_SND_BONUS);
-        return;
-    }
     pb_audio_play(PB_SND_DRAIN);
     g->state = PB_STATE_DRAIN;
     g->state_timer = 0;
@@ -370,6 +390,34 @@ static void finalize_score(pb_game *g) {
     bool in = hs_submit(g, g->score);
     g->new_high = in;
     if (in) pb_game_nvs_save(g);
+}
+
+// 进入设置页。prev=退出后回到的状态(标题页或暂停菜单)。
+static void enter_settings(pb_game *g, pb_state_t prev) {
+    g->set_prev = prev;
+    g->set_sel = PB_SET_ROW_VOL;
+    g->set_edit = false;
+    g->state = PB_STATE_SETTINGS;
+    g->state_timer = 0;
+}
+
+// 调当前选中行的数值(UP 加/DOWN 减),音量 0..100、背光 PB_BLU_MIN..100。
+// 返回 true = 值确实变了(碰钳制到边界时不变,调用方不发音效)。
+static bool adj_setting(pb_game *g, bool up) {
+    uint8_t minv = 0, maxv = 100;
+    uint8_t *v;
+    if (g->set_sel == PB_SET_ROW_VOL) {
+        v = &g->vol;
+    } else {
+        v = &g->blu;
+        minv = PB_BLU_MIN;
+    }
+    int nv = (int)*v + (up ? PB_ADJ_STEP : -PB_ADJ_STEP);
+    if (nv < minv) nv = minv;
+    if (nv > maxv) nv = maxv;
+    if (nv == (int)*v) return false;
+    *v = (uint8_t)nv;
+    return true;
 }
 
 // ---- 主步进 ----
@@ -437,28 +485,104 @@ void pb_game_step(pb_game *g, float dt) {
                 continue;
             }
         }
-        // 暂停菜单:UP/DOWN 移动选项,OK 确认
-        if (g->state == PB_STATE_PAUSE) {
+        // 设置页:浏览模式下 UP/DOWN 选行、OK 进入调节或返回;
+        // 调节模式下 UP/DOWN 改值、OK 确认落盘。电量行只读,不可选。
+        if (g->state == PB_STATE_SETTINGS) {
             if (ev != PB_EV_PRESS) continue;
-            if (key == PB_KEY_L)      g->pause_sel = (uint8_t)((g->pause_sel + 2) % 3);
-            else if (key == PB_KEY_R) g->pause_sel = (uint8_t)((g->pause_sel + 1) % 3);
-            else if (key == PB_KEY_OK) {
-                if (g->pause_sel == 0)      g->state = g->paused_prev;   // RESUME
-                else if (g->pause_sel == 1) {                            // RESTART
-                    finalize_score(g);
-                    new_game(g);
-                } else {                                                 // EXIT
-                    finalize_score(g);
-                    g->state = PB_STATE_TITLE;
-                    g->state_timer = 0;
+            if (g->set_edit) {
+                if (key == PB_KEY_L)      { if (adj_setting(g, true))  pb_audio_play(PB_SND_UI_TICK); }
+                else if (key == PB_KEY_R) { if (adj_setting(g, false)) pb_audio_play(PB_SND_UI_TICK); }
+                else if (key == PB_KEY_OK) {          // 完成本行调节
+                    g->set_edit = false;
+                    pb_game_settings_save(g);
+                    pb_audio_play(PB_SND_UI_OK);
+                }
+            } else {
+                if (key == PB_KEY_L)      { g->set_sel = (uint8_t)((g->set_sel + PB_SET_ROWS - 1) % PB_SET_ROWS); pb_audio_play(PB_SND_UI_MOVE); }
+                else if (key == PB_KEY_R) { g->set_sel = (uint8_t)((g->set_sel + 1) % PB_SET_ROWS); pb_audio_play(PB_SND_UI_MOVE); }
+                else if (key == PB_KEY_OK) {
+                    if (g->set_sel == PB_SET_ROW_BACK) {   // 返回(退出时再存一次兜底)
+                        pb_game_settings_save(g);
+                        g->state = g->set_prev;
+                        g->state_timer = 0;
+                        pb_audio_play(PB_SND_UI_BACK);
+                    } else {
+                        g->set_edit = true;                // 进入音量/背光调节
+                        pb_audio_play(PB_SND_UI_OK);
+                    }
                 }
             }
             continue;
         }
-        // 只响应按下事件,避免长按 OK 退出后的抬起事件误触发新游戏
-        if (g->state == PB_STATE_TITLE && g->state_timer > 0.4f && ev == PB_EV_PRESS) {
-            new_game(g);
-            pb_audio_play(PB_SND_LAUNCH);
+        // 暂停菜单:UP/DOWN 移动选项,OK 确认(4 项:RESUME/RESTART/EXIT/SETTINGS)
+        if (g->state == PB_STATE_PAUSE) {
+            if (ev != PB_EV_PRESS) continue;
+            if (key == PB_KEY_L)      { g->pause_sel = (uint8_t)((g->pause_sel + 3) % 4); pb_audio_play(PB_SND_UI_MOVE); }
+            else if (key == PB_KEY_R) { g->pause_sel = (uint8_t)((g->pause_sel + 1) % 4); pb_audio_play(PB_SND_UI_MOVE); }
+            else if (key == PB_KEY_OK) {
+                if (g->pause_sel == 0)      { g->state = g->paused_prev; pb_audio_play(PB_SND_UI_BACK); }  // RESUME
+                else if (g->pause_sel == 1) {                            // RESTART
+                    finalize_score(g);
+                    new_game(g);
+                    pb_audio_play(PB_SND_UI_OK);
+                } else if (g->pause_sel == 2) {                          // EXIT
+                    finalize_score(g);
+                    g->state = PB_STATE_TITLE;
+                    g->state_timer = 0;
+                    pb_audio_play(PB_SND_UI_BACK);
+                } else {                                                 // SETTINGS
+                    enter_settings(g, PB_STATE_PAUSE);
+                    pb_audio_play(PB_SND_UI_OK);
+                }
+            }
+            continue;
+        }
+        // 排行榜页:OK 返回主菜单(其余键忽略)。
+        if (g->state == PB_STATE_HS) {
+            if (ev == PB_EV_PRESS && key == PB_KEY_OK && g->state_timer > 0.3f) {
+                g->state = PB_STATE_TITLE;
+                g->state_timer = 0;
+                pb_audio_play(PB_SND_UI_BACK);
+            }
+            continue;
+        }
+        // 玩法图鉴:LEFT/RIGHT 翻页,OK 返回主菜单。
+        if (g->state == PB_STATE_GUIDE) {
+            if (ev != PB_EV_PRESS || g->state_timer < 0.2f) continue;
+            if (key == PB_KEY_L)
+                { g->guide_page = (uint8_t)((g->guide_page + PB_GUIDE_PAGES - 1) % PB_GUIDE_PAGES); pb_audio_play(PB_SND_UI_MOVE); }
+            else if (key == PB_KEY_R)
+                { g->guide_page = (uint8_t)((g->guide_page + 1) % PB_GUIDE_PAGES); pb_audio_play(PB_SND_UI_MOVE); }
+            else if (key == PB_KEY_OK) {
+                g->state = PB_STATE_TITLE;
+                g->state_timer = 0;
+                pb_audio_play(PB_SND_UI_BACK);
+            }
+            continue;
+        }
+        // 主菜单(标题页):UP/DOWN 选项,OK 确认。START/HOW TO PLAY/SETTINGS/HIGH SCORES。
+        if (g->state == PB_STATE_TITLE) {
+            if (ev != PB_EV_PRESS || g->state_timer < 0.3f) continue;
+            if (key == PB_KEY_L)      { g->menu_sel = (uint8_t)((g->menu_sel + PB_MENU_ROWS - 1) % PB_MENU_ROWS); pb_audio_play(PB_SND_UI_MOVE); }
+            else if (key == PB_KEY_R) { g->menu_sel = (uint8_t)((g->menu_sel + 1) % PB_MENU_ROWS); pb_audio_play(PB_SND_UI_MOVE); }
+            else if (key == PB_KEY_OK) {
+                if (g->menu_sel == PB_MENU_START) {
+                    new_game(g);
+                    pb_audio_play(PB_SND_LAUNCH);
+                } else if (g->menu_sel == PB_MENU_GUIDE) {
+                    g->guide_page = 0;
+                    g->state = PB_STATE_GUIDE;
+                    g->state_timer = 0;
+                    pb_audio_play(PB_SND_UI_OK);
+                } else if (g->menu_sel == PB_MENU_SETUP) {
+                    enter_settings(g, PB_STATE_TITLE);
+                    pb_audio_play(PB_SND_UI_OK);
+                } else {                                // HIGH SCORES
+                    g->state = PB_STATE_HS;
+                    g->state_timer = 0;
+                    pb_audio_play(PB_SND_UI_OK);
+                }
+            }
             continue;
         }
         if (g->state == PB_STATE_OVER && g->state_timer > 1.0f && ev == PB_EV_PRESS) {
@@ -473,8 +597,6 @@ void pb_game_step(pb_game *g, float dt) {
                 float v = 800.0f + 450.0f * g->launch_power;
                 g->table.world.ball.vel.x = 0;
                 g->table.world.ball.vel.y = -v;
-                if (!g->ball_save_used)         // §4.3 球保存只在每球首次发射时武装
-                    g->ball_save = PB_BALL_SAVE_S;
                 g->state = PB_STATE_PLAY;
                 g->state_timer = 0;
                 show_msg(g, "", 0);
